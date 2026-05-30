@@ -14,3 +14,8 @@ export const DOCK_CLEARANCE = 80; // keep windows above the dock
 export const FOV      = 45;
 export const CAMERA_Z = 6;
 export const Z_STEP   = 0.04; // world-z gap between stacked / focused windows
+
+// Dynamic drag-shrink: a central plateau stays full-size; a window shrinks
+// toward the edges so it can be "placed back" in space (scale, not real z).
+export const PLATEAU_FRAC = 0.5; // central fraction of desktop width kept full-size
+export const SHRUNK_PX    = 110; // ~icon target width (px) for a window at the edge

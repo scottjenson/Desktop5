@@ -6,7 +6,20 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
+  PLATEAU_FRAC, SHRUNK_PX,
 } from './config.js';
+
+// Visual scale for a window whose center-x is `cx` (desktop px). Full size inside
+// the central plateau; smoothstep ramp down to ~icon size at the left/right edge.
+function scaleForCenterX(cx, info) {
+  const half = (PLATEAU_FRAC * DESKTOP_W) / 2;       // plateau half-width
+  const d = Math.abs(cx - DESKTOP_W / 2);            // distance from desktop center
+  if (d <= half) return 1;
+  const t = Math.min((d - half) / (DESKTOP_W / 2 - half), 1); // 0 at plateau edge → 1 at screen edge
+  const ts = t * t * (3 - 2 * t);                    // smoothstep
+  const min = SHRUNK_PX / info.w;
+  return 1 - ts * (1 - min);
+}
 
 // windowMeshes: [{ mesh, w, h, id }]   S: world units per desktop px
 export function initWindows({ gl, camera, windowMeshes, S }) {
@@ -56,7 +69,14 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
     if (localY <= TITLEBAR_H) {
       dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), mesh.position);
       raycaster.ray.intersectPlane(dragPlane, hit);
-      drag = { mesh, info, offX: mesh.position.x - hit.x, offY: mesh.position.y - hit.y };
+      const grabScale = mesh.scale.x || 1;
+      // Grab offset stored scale-independently: the grabbed point stays under the
+      // cursor at any scale (no slip) and there's no jump on grab.
+      drag = {
+        mesh, info, scale: grabScale,
+        localOffX: (mesh.position.x - hit.x) / grabScale,
+        localOffY: (mesh.position.y - hit.y) / grabScale,
+      };
     }
     e.preventDefault();
   });
@@ -68,10 +88,28 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
     if (!raycaster.ray.intersectPlane(dragPlane, hit)) return;
 
     const { info } = drag;
-    // Proposed world position, then clamp in desktop-px space.
-    let { cx, cy } = worldToCenter(hit.x + drag.offX, hit.y + drag.offY);
-    cx = Math.min(Math.max(cx, MENUBAR_H + info.w / 2), DESKTOP_W - info.w / 2);
-    cy = Math.min(Math.max(cy, MENUBAR_H + info.h / 2), DESKTOP_H - DOCK_CLEARANCE - info.h / 2);
+
+    // scale depends on center-x, and the scale-relative grab offset shifts the
+    // center — resolve the coupling with one refinement (converges quickly).
+    let scale = drag.scale;
+    for (let i = 0; i < 2; i++) {
+      const cxEst = worldToCenter(hit.x + drag.localOffX * scale, 0).cx;
+      scale = scaleForCenterX(cxEst, info);
+    }
+
+    let { cx, cy } = worldToCenter(hit.x + drag.localOffX * scale, hit.y + drag.localOffY * scale);
+
+    // Clamp the center using the *shrunk* half-extents, so an icon-sized window
+    // can tuck right up to the edge.
+    const halfW = (info.w * scale) / 2;
+    const halfH = (info.h * scale) / 2;
+    cx = Math.min(Math.max(cx, halfW), DESKTOP_W - halfW);
+    cy = Math.min(Math.max(cy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+
+    // Keep scale consistent with the clamped position, then apply.
+    scale = scaleForCenterX(cx, info);
+    drag.scale = scale;
+    drag.mesh.scale.set(scale, scale, 1);
 
     const p = centerToWorld(cx, cy);
     drag.mesh.position.x = p.x;
