@@ -13,7 +13,7 @@ export const DOCK_CLEARANCE = 80; // keep windows above the dock
 // Camera / depth
 export const FOV      = 45;
 export const CAMERA_Z = 6;
-export const Z_STEP   = 0.04; // world-z gap between stacked / focused windows
+export const Z_STEP   = 0.01; // world-z gap between stacked / focused windows
 
 // Dynamic drag-shrink: a central plateau stays full-size; a window shrinks
 // toward the edges so it can be "placed back" in space (scale, not real z).

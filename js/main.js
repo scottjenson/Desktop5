@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── Renderer / scene / camera ─────────────────────────────
@@ -83,9 +83,12 @@ await Promise.all(sources.map(async (canvas, i) => {
 
   const x = Number(canvas.dataset.x);
   const y = Number(canvas.dataset.y);
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-  mesh.position.set((cx - DESKTOP_W / 2) * S, (DESKTOP_H / 2 - cy) * S, (i + 1) * Z_STEP);
+  const z = (i + 1) * Z_STEP;
+
+  const cx = Math.min(Math.max(x + w / 2, w / 2), DESKTOP_W - w / 2);
+  const cy = Math.min(Math.max(y + h / 2, MENUBAR_H + h / 2), DESKTOP_H - DOCK_CLEARANCE - h / 2);
+
+  mesh.position.set((cx - DESKTOP_W / 2) * S, (DESKTOP_H / 2 - cy) * S, z);
 
   windowMeshes.push({ mesh, w, h, id });
   scene.add(mesh);
