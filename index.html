@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Desktop5</title>
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/desktop.css">
+<link rel="stylesheet" href="css/windows.css">
+</head>
+<body>
+
+<!-- Visible WebGL output. Receives all pointer events; raycaster maps them to meshes. -->
+<canvas id="gl"></canvas>
+
+<!--
+  Hidden texture sources. Each <canvas layoutsubtree> rasterizes one subtree into
+  its own HTMLTexture. The chrome canvas is inline; the four window canvases are
+  filled from windows/*.html by main.js. The data-x / data-y attributes give each
+  window's initial desktop-px position; width/height give its size.
+-->
+<div id="sources">
+
+  <!-- Desktop chrome: wallpaper + menubar + dock + trash -->
+  <canvas class="src" id="src-chrome" layoutsubtree width="2560" height="1080">
+    <div id="desktop-chrome">
+
+      <div id="menubar">
+        <span class="apple">&#63743;</span>
+        <span class="menu-item bold">Finder</span>
+        <span class="menu-item">File</span>
+        <span class="menu-item">Edit</span>
+        <span class="menu-item">View</span>
+        <span class="menu-item">Go</span>
+        <span class="menu-item">Window</span>
+        <span class="menu-item">Help</span>
+        <span class="spacer"></span>
+        <div class="menu-right">
+          <span>🔋 91%</span>
+          <span>📶 Wi-Fi</span>
+          <span>Fri 3:24 PM</span>
+          <span>🔍</span>
+        </div>
+      </div>
+
+      <div id="trash">
+        <svg viewBox="0 0 46 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="5" y="14" width="36" height="34" rx="4" fill="url(#tg)" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+          <line x1="16" y1="20" x2="16" y2="42" stroke="rgba(255,255,255,0.28)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="23" y1="20" x2="23" y2="42" stroke="rgba(255,255,255,0.28)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="30" y1="20" x2="30" y2="42" stroke="rgba(255,255,255,0.28)" stroke-width="1.5" stroke-linecap="round"/>
+          <rect x="3" y="9" width="40" height="6" rx="3" fill="url(#lg)" stroke="rgba(255,255,255,0.18)" stroke-width="0.5"/>
+          <rect x="17" y="5" width="12" height="5" rx="2.5" fill="url(#lg)" stroke="rgba(255,255,255,0.12)" stroke-width="0.5"/>
+          <defs>
+            <linearGradient id="tg" x1="5" y1="14" x2="41" y2="48" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#7080a8"/><stop offset="100%" stop-color="#404e70"/>
+            </linearGradient>
+            <linearGradient id="lg" x1="3" y1="9" x2="43" y2="15" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8898c0"/><stop offset="100%" stop-color="#505e88"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="label">Trash</span>
+      </div>
+
+      <div id="dock">
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#5ac8fa,#007aff)">🔵</div><div class="dock-dot"></div></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#1e1e1e,#3d1f6e)">🟣</div><div class="dock-dot"></div></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#34aadc,#1273ae)">🌐</div><div class="dock-dot"></div></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#1db954,#148039)">🎵</div><div class="dock-dot"></div></div>
+        <div class="dock-sep"></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#f5f5f7,#d1d1d6)">📝</div></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#ff9f0a,#c97300)">📬</div></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#1c1c1e,#2c2c2e)">⬛</div></div>
+        <div class="dock-item"><div class="dock-icon" style="background:linear-gradient(145deg,#636366,#3a3a3c)">⚙️</div></div>
+      </div>
+
+    </div>
+  </canvas>
+
+  <!-- Window texture sources (back-to-front order; filled from windows/*.html) -->
+  <canvas class="src" data-id="music"    data-x="280"  data-y="400" layoutsubtree width="680" height="480"></canvas>
+  <canvas class="src" data-id="browser"  data-x="1140" data-y="60"  layoutsubtree width="900" height="560"></canvas>
+  <canvas class="src" data-id="obsidian" data-x="620"  data-y="100" layoutsubtree width="820" height="540"></canvas>
+  <canvas class="src" data-id="finder"   data-x="180"  data-y="80"  layoutsubtree width="760" height="480"></canvas>
+
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

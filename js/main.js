@@ -1,0 +1,101 @@
+// Scene setup: one static chrome plane + one textured mesh per window.
+//
+// Two kinds of canvas, deliberately separated:
+//   • #gl                  — the visible WebGL output and the only event surface
+//   • #sources .src        — hidden <canvas layoutsubtree> texture sources
+// HTMLTexture's `onpaint` is a single slot per canvas, so each window needs its
+// own source canvas to get an independent, live-updating texture.
+
+import * as THREE from 'three';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP } from './config.js';
+import { initWindows } from './windows.js';
+
+// ── Renderer / scene / camera ─────────────────────────────
+const gl = document.getElementById('gl');
+const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true });
+renderer.setSize(DESKTOP_W, DESKTOP_H, false); // fixed buffer; CSS handled below
+// Render at device resolution so the fitted canvas isn't upscaled (clamped to 2×).
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+// Camera aspect is locked to the desktop ratio, so the texture is never stretched.
+const camera = new THREE.PerspectiveCamera(FOV, DESKTOP_W / DESKTOP_H, 0.1, 100);
+camera.position.z = CAMERA_Z;
+
+// CSS-scale the canvas to fit the viewport → black bars top/bottom.
+function fitCanvas() {
+  const s = Math.min(window.innerWidth / DESKTOP_W, window.innerHeight / DESKTOP_H);
+  gl.style.width = DESKTOP_W * s + 'px';
+  gl.style.height = DESKTOP_H * s + 'px';
+}
+fitCanvas();
+window.addEventListener('resize', fitCanvas);
+
+// World dimensions of the full desktop at z = 0, and px→world scale.
+const fovRad = THREE.MathUtils.degToRad(FOV);
+const planeH = 2 * Math.tan(fovRad / 2) * CAMERA_Z;
+const planeW = planeH * (DESKTOP_W / DESKTOP_H);
+const S = planeH / DESKTOP_H; // world units per desktop px (uniform in x and y)
+
+function htmlTexture(el) {
+  const t = new THREE.HTMLTexture(el);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// ── Static desktop chrome (wallpaper + menubar + dock + trash) ──
+const chrome = new THREE.Mesh(
+  new THREE.PlaneGeometry(planeW, planeH),
+  new THREE.MeshBasicMaterial({ map: htmlTexture(document.getElementById('desktop-chrome')) })
+);
+chrome.position.z = 0;
+scene.add(chrome);
+
+// ── One textured plane per window ─────────────────────────
+const sources = [...document.querySelectorAll('#sources .src[data-id]')];
+const windowMeshes = [];
+
+await Promise.all(sources.map(async (canvas, i) => {
+  const id = canvas.dataset.id;
+  const html = await fetch(`windows/${id}.html`).then((r) => r.text());
+  canvas.innerHTML = html;
+
+  const el = canvas.querySelector('.os-window');
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Pin both the source canvas and the window to exact pixels so the subtree
+  // lays out at exactly the bitmap size (no %-of-ambiguous-containing-block
+  // squashing while the canvas is parked off-screen).
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  el.style.width = w + 'px';
+  el.style.height = h + 'px';
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * S, h * S),
+    // alphaTest discards the transparent rounded corners so they don't write
+    // depth and punch holes through windows stacked behind them.
+    new THREE.MeshBasicMaterial({ map: htmlTexture(el), transparent: true, alphaTest: 0.5 })
+  );
+
+  const x = Number(canvas.dataset.x);
+  const y = Number(canvas.dataset.y);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  mesh.position.set((cx - DESKTOP_W / 2) * S, (DESKTOP_H / 2 - cy) * S, (i + 1) * Z_STEP);
+
+  windowMeshes.push({ mesh, w, h, id });
+  scene.add(mesh);
+}));
+
+// ── Interaction ───────────────────────────────────────────
+initWindows({ gl, camera, windowMeshes, S });
+
+// ── Render loop ───────────────────────────────────────────
+(function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+})();

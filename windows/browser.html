@@ -1,0 +1,90 @@
+<div class="os-window" id="win-browser">
+  <div class="win-titlebar">
+    <div class="traffic-lights">
+      <div class="tl red"></div>
+      <div class="tl yellow"></div>
+      <div class="tl green"></div>
+    </div>
+    <span class="win-title">The Verge — Technology News</span>
+  </div>
+  <div class="win-body" style="flex-direction:column;">
+    <div class="browser-chrome">
+      <div class="browser-tabs">
+        <div class="browser-tab active">
+          <span class="tab-favicon">🟦</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">The Verge</span>
+          <span class="tab-close">✕</span>
+        </div>
+        <div class="browser-tab">
+          <span class="tab-favicon">🔴</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">YouTube</span>
+          <span class="tab-close">✕</span>
+        </div>
+        <div class="browser-tab">
+          <span class="tab-favicon">🐙</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">GitHub</span>
+          <span class="tab-close">✕</span>
+        </div>
+        <div style="width:28px;height:28px;background:rgba(0,0,0,0.06);border-radius:6px;display:flex;align-items:center;justify-content:center;margin-left:4px;align-self:center;font-size:16px;color:#666;">+</div>
+      </div>
+      <div class="browser-addressbar">
+        <span class="browser-nav-btn">◀</span>
+        <span class="browser-nav-btn">▶</span>
+        <span class="browser-nav-btn">↻</span>
+        <div class="browser-url">
+          <span class="lock">🔒</span>
+          <span class="domain">theverge.com</span>
+          <span class="path">/2026/5/30/chrome-canvas-html-api</span>
+        </div>
+        <span style="font-size:18px;color:#888;">⋮</span>
+      </div>
+    </div>
+    <div class="browser-content">
+      <div class="page-nav">
+        <div class="page-logo">THE VERGE</div>
+        <div class="page-nav-links">
+          <span class="page-nav-link active">Tech</span>
+          <span class="page-nav-link">Science</span>
+          <span class="page-nav-link">AI</span>
+          <span class="page-nav-link">Reviews</span>
+          <span class="page-nav-link">Deals</span>
+        </div>
+      </div>
+      <div class="page-hero">
+        <div class="page-hero-eyebrow">Chrome 146 · Web APIs</div>
+        <div class="page-hero-h1">Chrome's HTML-in-Canvas API<br>is here — and it's wild</div>
+        <div class="page-hero-sub">Google's experimental <code style="background:rgba(255,255,255,0.15);padding:1px 5px;border-radius:3px;">layoutsubtree</code> attribute lets browsers render live DOM elements directly into a WebGL texture — enabling a new class of spatial UIs.</div>
+        <div class="page-hero-cta">Read More</div>
+      </div>
+      <div class="page-body">
+        <div class="page-section-label">Deep Dive</div>
+        <div class="page-h2">What does it mean for the web?</div>
+        <div class="page-p">For years, developers have hacked around the browser's compositing model to get HTML content into WebGL. Libraries like <strong>html2canvas</strong> used screenshot tricks, while CSS3DRenderer faked depth with matrix transforms. Neither approach gave you true WebGL integration.</div>
+        <div class="page-p">The new <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">layoutsubtree</code> canvas attribute changes that. Child DOM nodes are rasterized by the browser's own layout engine and exposed to the canvas paint event — meaning hover states, CSS animations, and interactive elements all work inside the texture.</div>
+        <div class="page-cards">
+          <div class="page-card">
+            <div class="page-card-img" style="background:#e8f0fe;">🎨</div>
+            <div class="page-card-body">
+              <div class="page-card-title">Native Rendering</div>
+              <div class="page-card-desc">Browser's own compositor handles layout, no JS screenshotting</div>
+            </div>
+          </div>
+          <div class="page-card">
+            <div class="page-card-img" style="background:#fce8e6;">⚡</div>
+            <div class="page-card-body">
+              <div class="page-card-title">Low Latency</div>
+              <div class="page-card-desc">Paint events fire synchronously with DOM mutations</div>
+            </div>
+          </div>
+          <div class="page-card">
+            <div class="page-card-img" style="background:#e6f4ea;">🖱</div>
+            <div class="page-card-body">
+              <div class="page-card-title">Hit Testing</div>
+              <div class="page-card-desc">UV coords map back to DOM elements via elementFromPoint</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

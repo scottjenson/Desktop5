@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+
+# Starter example — kept locally only, not part of the prototype
+old/
+
+# Local-only Claude Code settings
+.claude/settings.local.json

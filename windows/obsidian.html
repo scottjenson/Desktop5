@@ -1,0 +1,59 @@
+<div class="os-window" id="win-obsidian">
+  <div class="win-titlebar">
+    <div class="traffic-lights">
+      <div class="tl red"></div>
+      <div class="tl yellow"></div>
+      <div class="tl green"></div>
+    </div>
+    <span class="win-title">Desktop5 — Obsidian</span>
+  </div>
+  <div class="win-body">
+    <!-- File tree -->
+    <div class="obsidian-sidebar">
+      <div class="obs-sidebar-header">Vault: Research</div>
+      <div class="obs-file-tree">
+        <div class="obs-folder"><span class="fold-icon">▼</span> 📂 Projects</div>
+        <div class="obs-file active">📄 Desktop5 Spec</div>
+        <div class="obs-file">📄 UI Paradigms</div>
+        <div class="obs-file">📄 3D Web Notes</div>
+        <div class="obs-folder"><span class="fold-icon">▶</span> 📂 Reading</div>
+        <div class="obs-folder"><span class="fold-icon">▼</span> 📂 Daily Notes</div>
+        <div class="obs-file">📄 2026-05-30</div>
+        <div class="obs-file">📄 2026-05-29</div>
+        <div class="obs-file">📄 2026-05-28</div>
+        <div class="obs-folder"><span class="fold-icon">▶</span> 📂 Resources</div>
+        <div class="obs-folder"><span class="fold-icon">▶</span> 📂 Archive</div>
+        <div class="obs-file">📄 Meeting Notes</div>
+        <div class="obs-file">📄 Ideas Backlog</div>
+        <div class="obs-file">📄 API Reference</div>
+      </div>
+    </div>
+    <!-- Editor -->
+    <div class="obsidian-editor">
+      <div class="obs-line obs-h1"># Desktop5 Spec</div>
+      <div class="obs-line" style="color:#777;font-size:11px;margin-bottom:16px;">Last modified: May 30, 2026 &nbsp;·&nbsp; <span class="obs-tag">#project</span> <span class="obs-tag">#prototype</span></div>
+      <div class="obs-line obs-h2">## Overview</div>
+      <div class="obs-line">This prototype explores rendering <span class="obs-bold">HTML windows inside a WebGL canvas</span> using Chrome's experimental <span class="obs-code">layoutsubtree</span> API.</div>
+      <div class="obs-line">&nbsp;</div>
+      <div class="obs-line obs-h2">## Goals</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> Simulate an <span class="obs-bold">ultrawide desktop</span> (21:9) on a standard monitor</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> All windows are real HTML — draggable as Three.js meshes</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> <span class="obs-italic">Edge proximity</span> causes windows to scale down (recede in space)</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> No rotation — flat, parallel to screen at all times</div>
+      <div class="obs-line">&nbsp;</div>
+      <div class="obs-line obs-h2">## Key API</div>
+      <div class="obs-codeblock">
+        <div><span class="kw">const</span> texture = <span class="kw">new</span> <span class="fn">HTMLTexture</span>(domElement);</div>
+        <div>canvas.<span class="fn">addEventListener</span>(<span class="str">'paint'</span>, () => {</div>
+        <div>&nbsp;&nbsp;texture.needsUpdate = <span class="kw">true</span>; <span class="cm">// re-rasterize on DOM change</span></div>
+        <div>});</div>
+      </div>
+      <div class="obs-line">&nbsp;</div>
+      <hr class="obs-divider">
+      <div class="obs-line obs-h2">## Open Questions</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> How does <span class="obs-link">raycasting UV→DOM coords</span> behave near edges?</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> Does <span class="obs-code">paint</span> fire reliably on CSS <span class="obs-code">:hover</span> changes?</div>
+      <div class="obs-line"><span class="obs-bullet">-</span> Performance with 4+ windows simultaneously</div>
+    </div>
+  </div>
+</div>
