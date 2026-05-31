@@ -3,10 +3,12 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
-  PLATEAU_FRAC, SHRUNK_PX,
+  PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP,
 } from './config.js';
 
-// Scale purely as a function of horizontal center position.
+// ── Helpers ───────────────────────────────────────────────
+
+// Continuous scale as a function of horizontal position (used during normal drag).
 function scaleForCenterX(cx, info) {
   const half = (PLATEAU_FRAC * DESKTOP_W) / 2;
   const d = Math.abs(cx - DESKTOP_W / 2);
@@ -16,7 +18,46 @@ function scaleForCenterX(cx, info) {
   return 1 - ts * (1 - SHRUNK_PX / info.w);
 }
 
-export function initWindows({ gl, camera, windowMeshes, S }) {
+// Zone highlight rectangles — icon zones are narrow, center zones match the plateau halves.
+const _pL = DESKTOP_W * (1 - PLATEAU_FRAC) / 2; // plateau left boundary  = 640
+const _pM = DESKTOP_W / 2;                        // plateau center         = 1280
+const _pR = DESKTOP_W * (1 + PLATEAU_FRAC) / 2; // plateau right boundary = 1920
+const _iW = SHRUNK_PX + 90;                       // icon zone highlight width (~200px)
+const _cW = DESKTOP_W * PLATEAU_FRAC / 2;         // center zone width = 640px
+
+const ZONE_RECTS = [
+  { left: 0,              width: _iW }, // zone 0 — icon-left
+  { left: _pL,            width: _cW }, // zone 1 — left-center  (x=640, w=640)
+  { left: _pM,            width: _cW }, // zone 2 — right-center (x=1280, w=640)
+  { left: DESKTOP_W - _iW, width: _iW }, // zone 3 — icon-right
+];
+
+// Zone detection uses plateau boundaries so icon zones (outer regions) map to 0 / 3.
+function zoneIndexForCx(cursorCx) {
+  if (cursorCx < _pL) return 0;
+  if (cursorCx < _pM) return 1;
+  if (cursorCx < _pR) return 2;
+  return 3;
+}
+
+// Returns the snap {cx, scale} for a given zone index.
+function snapForZone(index, info) {
+  const pLeft  = DESKTOP_W * (1 - PLATEAU_FRAC) / 2; // 640
+  const pMid   = DESKTOP_W / 2;                        // 1280
+  const pRight = DESKTOP_W * (1 + PLATEAU_FRAC) / 2; // 1920
+  const iconScale = SHRUNK_PX / info.w;
+  const snaps = [
+    { cx: SHRUNK_PX / 2,             scale: iconScale }, // icon-left
+    { cx: (pLeft + pMid) / 2,        scale: 1         }, // left-slot  (960)
+    { cx: (pMid + pRight) / 2,       scale: 1         }, // right-slot (1600)
+    { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // icon-right
+  ];
+  return snaps[index];
+}
+
+// ── Main ──────────────────────────────────────────────────
+
+export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const dragPlane = new THREE.Plane();
@@ -41,6 +82,22 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
   const centerToWorld = (cx, cy) => ({ x: (cx - DESKTOP_W / 2) * S, y: (DESKTOP_H / 2 - cy) * S });
   const worldToCenter = (x, y) => ({ cx: x / S + DESKTOP_W / 2, cy: DESKTOP_H / 2 - y / S });
 
+  // ── Zone overlay ────────────────────────────────────────
+  const overlay = document.getElementById('snap-zone-overlay');
+
+  function showZone(index) {
+    overlay.style.left  = ZONE_RECTS[index].left + 'px';
+    overlay.style.width = ZONE_RECTS[index].width + 'px';
+    overlay.style.display = 'block';
+    chromeSrc.requestPaint?.();
+  }
+  function hideZone() {
+    if (overlay.style.display === 'none') return;
+    overlay.style.display = 'none';
+    chromeSrc.requestPaint?.();
+  }
+
+  // ── Input ───────────────────────────────────────────────
   gl.addEventListener('mousedown', (e) => {
     toNdc(e);
     raycaster.setFromCamera(ndc, camera);
@@ -54,7 +111,10 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
     if (idx !== -1) { stack.splice(idx, 1); stack.push(info); restack(); }
 
     const localY = (1 - hits[0].uv.y) * info.h;
-    if (localY <= TITLEBAR_H) {
+    const isShift = e.shiftKey;
+
+    // Normal drag: titlebar only. Shift-drag: anywhere on the window.
+    if (localY <= TITLEBAR_H || isShift) {
       dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), mesh.position);
       raycaster.ray.intersectPlane(dragPlane, hit);
 
@@ -62,11 +122,18 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
       const cursorCx = worldToCenter(hit.x, 0).cx;
       const cursorCy = worldToCenter(0, hit.y).cy;
       const grabScale = mesh.scale.x || 1;
-      const windowTopY = cy - (info.h * grabScale) / 2; // top edge in desktop px at grab time
+      const windowTopY = cy - (info.h * grabScale) / 2;
+
       drag = {
         mesh, info,
-        grabOffsetX: cx - cursorCx,     // cursor → window center x (constant)
-        topOffsetY: windowTopY - cursorCy, // cursor → window TOP y (constant)
+        shift: isShift,
+        grabOffsetX: cx - cursorCx,
+        topOffsetY:  windowTopY - cursorCy,
+        // Zone starts null — first SNAP_ZONE_STEP px of movement determines the
+        // initial zone from cursor position, then ratchets ±1 from there.
+        activeZone:   null,
+        lastCursorCx: cursorCx,
+        accumX: 0,
       };
     }
     e.preventDefault();
@@ -82,20 +149,43 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
     const cursorCx = worldToCenter(hit.x, 0).cx;
     const cursorCy = worldToCenter(0, hit.y).cy;
 
-    // X: cursor + constant offset → scale → clamp → recompute scale.
+    // X: free drag (same formula for both normal and shift).
     let cx = cursorCx + drag.grabOffsetX;
     let scale = scaleForCenterX(cx, info);
     const halfW = (info.w * scale) / 2;
     cx = Math.min(Math.max(cx, halfW), DESKTOP_W - halfW);
     scale = scaleForCenterX(cx, info);
 
-    // Y: anchor the window TOP to the cursor (not the center), so scale changes
-    // grow the window downward and never shift the top edge up or down.
+    // Y: anchor window top to cursor, hard clamped.
     const halfH = (info.h * scale) / 2;
     let windowTopY = cursorCy + drag.topOffsetY;
-    windowTopY = Math.max(windowTopY, MENUBAR_H);                          // hard top clamp
-    let cy = windowTopY + halfH;
-    cy = Math.min(cy, DESKTOP_H - DOCK_CLEARANCE - halfH);                // hard bottom clamp
+    windowTopY = Math.max(windowTopY, MENUBAR_H);
+    let cy = Math.min(windowTopY + halfH, DESKTOP_H - DOCK_CLEARANCE - halfH);
+
+    // Shift: ratcheted zone selection.
+    // First SNAP_ZONE_STEP px sets the initial zone from cursor position;
+    // each subsequent SNAP_ZONE_STEP px steps the zone ±1.
+    if (drag.shift) {
+      drag.accumX += cursorCx - drag.lastCursorCx;
+      drag.lastCursorCx = cursorCx;
+
+      if (drag.activeZone === null) {
+        // Waiting for first threshold crossing to establish a starting zone.
+        if (Math.abs(drag.accumX) >= SNAP_ZONE_STEP) {
+          drag.activeZone = zoneIndexForCx(cursorCx);
+          drag.accumX = 0;
+          showZone(drag.activeZone);
+        }
+      } else if (drag.accumX <= -SNAP_ZONE_STEP) {
+        drag.activeZone = Math.max(0, drag.activeZone - 1);
+        drag.accumX += SNAP_ZONE_STEP;
+        showZone(drag.activeZone);
+      } else if (drag.accumX >= SNAP_ZONE_STEP) {
+        drag.activeZone = Math.min(3, drag.activeZone + 1);
+        drag.accumX -= SNAP_ZONE_STEP;
+        showZone(drag.activeZone);
+      }
+    }
 
     drag.mesh.scale.set(scale, scale, 1);
     const p = centerToWorld(cx, cy);
@@ -103,5 +193,29 @@ export function initWindows({ gl, camera, windowMeshes, S }) {
     drag.mesh.position.y = p.y;
   });
 
-  window.addEventListener('mouseup', () => { drag = null; });
+  // Shift released mid-drag: cancel zone highlight, continue free drag.
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift' && drag?.shift) {
+      drag.shift = false;
+      drag.activeZone = null;
+      hideZone();
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (drag?.shift && drag.activeZone !== null) {
+      // Snap window to the highlighted zone, preserving current Y.
+      const { info, mesh } = drag;
+      const snap = snapForZone(drag.activeZone, info);
+      const halfH = (info.h * snap.scale) / 2;
+      const curCy = DESKTOP_H / 2 - mesh.position.y / S;
+      const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+      mesh.scale.set(snap.scale, snap.scale, 1);
+      const p = centerToWorld(snap.cx, cy);
+      mesh.position.x = p.x;
+      mesh.position.y = p.y;
+    }
+    hideZone();
+    drag = null;
+  });
 }

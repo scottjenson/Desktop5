@@ -17,5 +17,6 @@ export const Z_STEP   = 0.01; // world-z gap between stacked / focused windows
 
 // Dynamic drag-shrink: a central plateau stays full-size; a window shrinks
 // toward the edges so it can be "placed back" in space (scale, not real z).
-export const PLATEAU_FRAC = 0.5; // central fraction of desktop width kept full-size
-export const SHRUNK_PX    = 110; // ~icon target width (px) for a window at the edge
+export const PLATEAU_FRAC    = 0.5; // central fraction of desktop width kept full-size
+export const SHRUNK_PX       = 110; // ~icon target width (px) for a window at the edge
+export const SNAP_ZONE_STEP  = 100; // px of horizontal movement to advance one snap zone

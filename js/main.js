@@ -46,9 +46,13 @@ function htmlTexture(el) {
 }
 
 // ── Static desktop chrome (wallpaper + menubar + dock + trash) ──
+const chromeDom = document.getElementById('desktop-chrome');
+chromeDom.style.width = DESKTOP_W + 'px';
+chromeDom.style.height = DESKTOP_H + 'px';
+
 const chrome = new THREE.Mesh(
   new THREE.PlaneGeometry(planeW, planeH),
-  new THREE.MeshBasicMaterial({ map: htmlTexture(document.getElementById('desktop-chrome')) })
+  new THREE.MeshBasicMaterial({ map: htmlTexture(chromeDom) })
 );
 chrome.position.z = 0;
 scene.add(chrome);
@@ -95,7 +99,7 @@ await Promise.all(sources.map(async (canvas, i) => {
 }));
 
 // ── Interaction ───────────────────────────────────────────
-initWindows({ gl, camera, windowMeshes, S });
+initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome') });
 
 // ── Render loop ───────────────────────────────────────────
 (function animate() {

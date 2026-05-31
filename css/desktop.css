@@ -12,6 +12,18 @@
   user-select: none;
 }
 
+/* Zone snap overlay — shown during shift-drag */
+#snap-zone-overlay {
+  display: none;
+  position: absolute;
+  top: 26px;       /* below menubar */
+  height: 974px;   /* 1080 - menubar(26) - dock(80) */
+  border-radius: 16px;
+  background: rgba(100, 160, 255, 0.12);
+  border: 1.5px solid rgba(100, 160, 255, 0.28);
+  pointer-events: none;
+}
+
 #menubar {
   position: absolute;
   top: 0; left: 0; right: 0;
