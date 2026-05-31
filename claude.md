@@ -47,16 +47,19 @@ index.html      #gl output canvas + hidden #sources (chrome inline + one <canvas
 css/base.css    reset, :root vars, #gl letterbox positioning, #sources off-screen parking
 css/desktop.css chrome: wallpaper, menubar, dock, trash + SHARED window frame (.os-window, titlebar)
 css/windows.css per-window INTERNAL styles only (no size/position)
-js/config.js    constants: DESKTOP_W/H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, FOV, CAMERA_Z, Z_STEP
-js/main.js      scene/camera/renderer; discovers sources, builds texture+mesh per window; render loop
-js/windows.js   raycaster focus + titlebar drag; bounded z-slot stacking
-windows/*.html  the four window content fragments (finder, obsidian, browser, music)
+js/config.js    constants: DESKTOP_W/H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, FOV, CAMERA_Z, Z_STEP,
+                            PLATEAU_FRAC, SHRINK_FRAC, SHRUNK_PX, SNAP_ZONE_STEP
+js/main.js      scene/camera/renderer; discovers sources, builds texture+mesh per window; render loop;
+                caches scrollEl per window at init time
+js/windows.js   raycaster focus + titlebar drag; bounded z-slot stacking; 6-zone shift-drag;
+                park-all animation engine; frontmost-window scroll routing; "1" key menubar toggle
+windows/*.html  five window fragments (finder, obsidian, browser, music, wordprocessor)
 ```
 
 ### Coordinate model
-* Internal desktop is **2560×1080**. The camera aspect is **locked** to `DESKTOP_W/DESKTOP_H` so the texture is never stretched.
+* Internal desktop is **3440×1440** (ultrawide). The camera aspect is **locked** to `DESKTOP_W/DESKTOP_H` so the texture is never stretched.
 * `#gl` is CSS-scaled to fit the viewport (`min` of width/height ratios); `body` is black ⇒ **letterbox bars top/bottom** on standard monitors. `renderer.setSize(DESKTOP_W, DESKTOP_H, false)` — the `false` keeps Three.js from touching CSS.
-* `S = planeH / DESKTOP_H` is world-units-per-desktop-px (uniform). A window at desktop px `(x,y,w,h)` → plane geometry `(w*S × h*S)`, centered at `((cx−1280)*S, (540−cy)*S)`.
+* `S = planeH / DESKTOP_H` is world-units-per-desktop-px (uniform). A window at desktop px `(x,y,w,h)` → plane geometry `(w*S × h*S)`, centered at `((cx−1720)*S, (720−cy)*S)`.
 
 ### Interaction (`js/windows.js`)
 * All input is on `#gl`. `Raycaster.setFromCamera(ndc)` → `intersectObjects(windowMeshes)`; **closest hit = topmost** (true 3D z-order, no z-index bookkeeping).
@@ -95,6 +98,15 @@ An earlier attempt receded windows with CSS `transform: scale()` + `opacity` ins
 
 **6. Deferred polish (known gaps).** Window drop-shadows clip at the source-canvas edge — removed for now; re-add by padding the source canvas around the window. Edge-recession depth (windows shrink as they near desktop edges) is intended but **deferred**; when added, do it as real `z`, with separate horizontal/vertical edge zones (a single width-based margin over-triggers vertically).
 
+**7. Isolate high-frequency canvases — small canvas = cheap repaint.**
+Any element that animates or updates frequently should live in its own small source canvas. The menubar (3440×39) was originally inside the 3440×1440 chrome canvas; every CSS transition repainted the full 5M-pixel bitmap at 60fps. Moving it to its own 90k-pixel canvas made animation free. Rule: **if an element needs frequent `requestPaint` calls, give it its own source canvas sized to just that element.**
+
+**8. Park-all UX — clicking any window ends the park session.**
+The shift-hold-1s park gesture moves all full-size windows to 50% mid-zones. When the user then clicks or drags any window, `parkedWindows` is cleared entirely on `mousedown` — so shift-release does not restore the others. This is intentional: the click signals "I'm done parking, I'm taking action now." Restoring the others on shift-up would undo what the user just did. Rule: **mousedown during park state = session over; clear `parkedWindows` entirely, leave everything in place.**
+
+**9. Cache scrollable DOM refs at init — `layoutsubtree` hides the DOM at runtime.**
+After the first `onpaint`, Chrome moves source-canvas child nodes into an internal tree; `canvas.querySelectorAll('*')` returns 0 elements at runtime. Scroll routing works by caching `scrollEl` references in `main.js` at init time (while the DOM is still accessible) and storing them on each `windowMeshes` entry. Wheel events on `#gl` then route `deltaY` to `top.scrollEl.scrollTop` directly. **Do not try to query source-canvas DOM after initialization.**
+
 ---
 ## 🚨 Anti-Patterns (DO NOT DO THESE)
 1. **Do NOT** put all windows in one `layoutsubtree` canvas expecting independent live textures — `onpaint` is single-slot. One source canvas per window.
@@ -106,7 +118,8 @@ An earlier attempt receded windows with CSS `transform: scale()` + `opacity` ins
 
 ---
 ## 📍 Status & Next Steps
-* **Phase A — DONE (baseline, committed):** per-window source-canvas meshes; raycaster focus + titlebar drag; bounded z-slot stacking; letterboxed desktop; device-resolution (sharp) rendering; four windows (Finder, Obsidian, browser, music).
+* **Phase A — DONE (baseline):** per-window source-canvas meshes; raycaster focus + titlebar drag; bounded z-slot stacking; letterboxed desktop; device-resolution (sharp) rendering; four windows (Finder, Obsidian, browser, music).
+* **Phase A extended — DONE:** ultrawide 3440×1440 desktop; separate menubar source canvas (3440×39); 6-zone shift-drag with ratchet (100px steps); shift-click toggle full-size ↔ 50% mid-zone; shift-hold-1s park-all with cubic ease-out animation engine; frontmost-window scroll routing via cached `scrollEl`; word processor (5th window); "1" key menubar centering toggle with `translateX` animation.
 * **Phase B — NEXT:** in-window interactivity — map raycaster `uv` → window-local px → `document.elementFromPoint` → dispatch synthetic click/hover so buttons, tabs, and hover states work.
 * **Polish (deferred):** edge-recession depth, window drop-shadows (source-canvas padding), focus animation.
 * **Backlog (parked — not now):**

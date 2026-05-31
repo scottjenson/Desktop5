@@ -10,6 +10,13 @@ import * as THREE from 'three';
 import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE } from './config.js';
 import { initWindows } from './windows.js';
 
+// ── CSS custom properties (derived from config.js) ────────
+const r = document.documentElement.style;
+r.setProperty('--menubar-h', MENUBAR_H + 'px');
+r.setProperty('--menu-shift', DESKTOP_W * 0.25 + 'px');
+r.setProperty('--snap-top', MENUBAR_H + 'px');
+r.setProperty('--snap-height', (DESKTOP_H - MENUBAR_H - DOCK_CLEARANCE) + 'px');
+
 // ── Renderer / scene / camera ─────────────────────────────
 const gl = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true });
@@ -45,7 +52,7 @@ function htmlTexture(el) {
   return t;
 }
 
-// ── Menubar — own canvas/mesh so animation repaints only its 3440×26 bitmap ──
+// ── Menubar — own canvas/mesh so animation repaints only its small bitmap ──
 const menubarSrc = document.getElementById('src-menubar');
 menubarSrc.style.width = DESKTOP_W + 'px';
 menubarSrc.style.height = MENUBAR_H + 'px';

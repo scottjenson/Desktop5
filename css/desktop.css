@@ -16,8 +16,8 @@
 #snap-zone-overlay {
   display: none;
   position: absolute;
-  top: 39px;       /* below menubar */
-  height: 1321px;  /* 1440 - menubar(39) - dock(80) */
+  top: var(--snap-top);
+  height: var(--snap-height);
   border-radius: 16px;
   background: rgba(100, 160, 255, 0.12);
   border: 1.5px solid rgba(100, 160, 255, 0.28);
@@ -45,7 +45,7 @@
   display: flex; align-items: center; gap: 18px;
   transition: transform 0.4s ease;
 }
-#menu-left.centered { transform: translateX(860px); }
+#menu-left.centered { transform: translateX(var(--menu-shift)); }
 #menubar .apple { font-size: 20px; margin-right: 4px; }
 #menubar .menu-item { font-weight: 500; }
 #menubar .menu-item.bold { font-weight: 700; }
@@ -57,7 +57,7 @@
 #menubar .menu-icon-item {
   display: flex; align-items: center; gap: 5px;
 }
-#menubar .menu-right.centered { transform: translateX(-860px); }
+#menubar .menu-right.centered { transform: translateX(calc(-1 * var(--menu-shift))); }
 
 #dock {
   position: absolute;
