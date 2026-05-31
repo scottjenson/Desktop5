@@ -18,39 +18,42 @@ function scaleForCenterX(cx, info) {
   return 1 - ts * (1 - SHRUNK_PX / info.w);
 }
 
-// Zone highlight rectangles — icon zones are narrow, center zones match the plateau halves.
+// Zone highlight rectangles — 6 zones from left to right.
 const _pL = DESKTOP_W * (1 - PLATEAU_FRAC) / 2; // plateau left boundary  = 640
 const _pM = DESKTOP_W / 2;                        // plateau center         = 1280
 const _pR = DESKTOP_W * (1 + PLATEAU_FRAC) / 2; // plateau right boundary = 1920
-const _iW = SHRUNK_PX + 90;                       // icon zone highlight width (~200px)
+const _iW = SHRUNK_PX + 90;                       // icon zone width (~200px)
 const _cW = DESKTOP_W * PLATEAU_FRAC / 2;         // center zone width = 640px
+const _mW = _pL - _iW;                            // mid zone width = 440px
 
 const ZONE_RECTS = [
-  { left: 0,              width: _iW }, // zone 0 — icon-left
-  { left: _pL,            width: _cW }, // zone 1 — left-center  (x=640, w=640)
-  { left: _pM,            width: _cW }, // zone 2 — right-center (x=1280, w=640)
-  { left: DESKTOP_W - _iW, width: _iW }, // zone 3 — icon-right
+  { left: 0,              width: _iW }, // zone 0 — icon-left   (x=0,    w=200)
+  { left: _iW,            width: _mW }, // zone 1 — mid-left    (x=200,  w=440)
+  { left: _pL,            width: _cW }, // zone 2 — left-center (x=640,  w=640)
+  { left: _pM,            width: _cW }, // zone 3 — right-center(x=1280, w=640)
+  { left: _pR,            width: _mW }, // zone 4 — mid-right   (x=1920, w=440)
+  { left: DESKTOP_W - _iW, width: _iW }, // zone 5 — icon-right  (x=2360, w=200)
 ];
 
-// Zone detection uses plateau boundaries so icon zones (outer regions) map to 0 / 3.
 function zoneIndexForCx(cursorCx) {
-  if (cursorCx < _pL) return 0;
-  if (cursorCx < _pM) return 1;
-  if (cursorCx < _pR) return 2;
-  return 3;
+  if (cursorCx < _iW) return 0;
+  if (cursorCx < _pL) return 1;
+  if (cursorCx < _pM) return 2;
+  if (cursorCx < _pR) return 3;
+  if (cursorCx < DESKTOP_W - _iW) return 4;
+  return 5;
 }
 
 // Returns the snap {cx, scale} for a given zone index.
 function snapForZone(index, info) {
-  const pLeft  = DESKTOP_W * (1 - PLATEAU_FRAC) / 2; // 640
-  const pMid   = DESKTOP_W / 2;                        // 1280
-  const pRight = DESKTOP_W * (1 + PLATEAU_FRAC) / 2; // 1920
   const iconScale = SHRUNK_PX / info.w;
   const snaps = [
-    { cx: SHRUNK_PX / 2,             scale: iconScale }, // icon-left
-    { cx: (pLeft + pMid) / 2,        scale: 1         }, // left-slot  (960)
-    { cx: (pMid + pRight) / 2,       scale: 1         }, // right-slot (1600)
-    { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // icon-right
+    { cx: SHRUNK_PX / 2,             scale: iconScale }, // icon-left  (55)
+    { cx: (_iW + _pL) / 2,           scale: 0.5       }, // mid-left   (420)
+    { cx: (_pL + _pM) / 2,           scale: 1         }, // left-slot  (960)
+    { cx: (_pM + _pR) / 2,           scale: 1         }, // right-slot (1600)
+    { cx: (_pR + DESKTOP_W - _iW) / 2, scale: 0.5     }, // mid-right  (2140)
+    { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // icon-right (2505)
   ];
   return snaps[index];
 }
@@ -172,7 +175,8 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
       if (drag.activeZone === null) {
         // Waiting for first threshold crossing to establish a starting zone.
         if (Math.abs(drag.accumX) >= SNAP_ZONE_STEP) {
-          drag.activeZone = zoneIndexForCx(cursorCx);
+          const dir = drag.accumX > 0 ? 1 : -1;
+          drag.activeZone = Math.min(5, Math.max(0, zoneIndexForCx(cursorCx) + dir));
           drag.accumX = 0;
           showZone(drag.activeZone);
         }
@@ -181,7 +185,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
         drag.accumX += SNAP_ZONE_STEP;
         showZone(drag.activeZone);
       } else if (drag.accumX >= SNAP_ZONE_STEP) {
-        drag.activeZone = Math.min(3, drag.activeZone + 1);
+        drag.activeZone = Math.min(5, drag.activeZone + 1);
         drag.accumX -= SNAP_ZONE_STEP;
         showZone(drag.activeZone);
       }
