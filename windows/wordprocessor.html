@@ -1,0 +1,98 @@
+<div class="os-window" id="win-wordprocessor">
+  <div class="win-titlebar">
+    <div class="traffic-lights">
+      <div class="tl red"></div>
+      <div class="tl yellow"></div>
+      <div class="tl green"></div>
+    </div>
+    <span class="win-title">Design Proposal.doc</span>
+  </div>
+
+  <div class="wp-toolbar">
+    <div class="wp-toolbar-group">
+      <div class="wp-font-select">Helvetica Neue <span class="wp-dropdown-arrow">▾</span></div>
+      <div class="wp-font-size">13 <span class="wp-dropdown-arrow">▾</span></div>
+    </div>
+    <div class="wp-toolbar-sep"></div>
+    <div class="wp-toolbar-group">
+      <button class="wp-btn wp-btn-bold">B</button>
+      <button class="wp-btn wp-btn-italic">I</button>
+      <button class="wp-btn wp-btn-underline">U</button>
+    </div>
+    <div class="wp-toolbar-sep"></div>
+    <div class="wp-toolbar-group">
+      <button class="wp-btn wp-active">≡</button>
+      <button class="wp-btn">≡</button>
+      <button class="wp-btn">≡</button>
+      <button class="wp-btn">≡</button>
+    </div>
+    <div class="wp-toolbar-sep"></div>
+    <div class="wp-toolbar-group">
+      <button class="wp-btn">⁋</button>
+      <button class="wp-btn">🔗</button>
+      <button class="wp-btn">📷</button>
+    </div>
+  </div>
+
+  <div class="win-body">
+    <div class="wp-scroll">
+      <div class="wp-page">
+
+        <h1 class="wp-h1">Rethinking the Desktop for Ultra-Wide Displays</h1>
+        <p class="wp-meta">Scott Jenson &nbsp;·&nbsp; Draft v0.4 &nbsp;·&nbsp; May 2026</p>
+
+        <h2 class="wp-h2">Executive Summary</h2>
+        <p class="wp-p">Modern displays have grown dramatically wider over the past decade, yet the fundamental model of how we arrange and interact with windows has remained largely unchanged since the early 1990s. This proposal outlines a new spatial interaction paradigm designed specifically for ultra-wide monitors, allowing users to manage depth, focus, and context in ways that feel natural rather than mechanical.</p>
+        <p class="wp-p">The core thesis is simple: on a 3440-pixel-wide display, the edges of the screen are genuinely far from the centre. Rather than fighting this geometry with ever-larger windows, we can embrace it — using the edges as a place to park work-in-progress at reduced scale, keeping the centre clear for active focus.</p>
+
+        <h2 class="wp-h2">Problem Statement</h2>
+        <p class="wp-p">Today's window management carries three inherited assumptions that no longer hold on modern hardware:</p>
+        <ul class="wp-ul">
+          <li>Windows are either open or minimised — there is no intermediate state.</li>
+          <li>All open windows compete for the same flat plane, distinguished only by z-index.</li>
+          <li>The user must explicitly resize and reposition every window manually to achieve any kind of spatial organisation.</li>
+        </ul>
+        <p class="wp-p">The result is the familiar problem of desktop clutter: a pile of overlapping rectangles with no inherent spatial logic. Research consistently shows that users spend a disproportionate amount of time managing window positions rather than doing the work the windows contain.</p>
+
+        <h2 class="wp-h2">Proposed Interaction Model</h2>
+        <p class="wp-p">The prototype introduces three complementary mechanisms. Each is designed to feel like a natural extension of existing mouse behaviour rather than a new mode the user must learn and remember.</p>
+
+        <h3 class="wp-h3">1. Continuous Depth Scaling</h3>
+        <p class="wp-p">As a window is dragged toward the left or right edge of the display, it scales down smoothly. The scaling curve is a smoothstep function, meaning the transition feels gradual in the centre of the screen and accelerates near the edges. A window at the far edge reaches approximately icon size — small enough to be clearly peripheral, large enough to remain identifiable.</p>
+        <p class="wp-p">This creates a natural depth metaphor without requiring true 3D perspective. Users quickly internalise the rule: <em>centre means active, edge means parked</em>.</p>
+
+        <h3 class="wp-h3">2. Snap Zones</h3>
+        <p class="wp-p">Six discrete snap zones divide the horizontal axis. Two full-size centre slots (left-centre and right-centre) hold primary work. Two mid-size slots at 50% scale hold secondary reference material. Two icon-size slots at the far edges hold minimised context.</p>
+        <p class="wp-p">Holding Shift while dragging activates snap mode. A translucent blue highlight previews the target zone as the cursor moves. Releasing the mouse snaps the window precisely into place. The highlight advances one zone per 100 pixels of horizontal movement, making it easy to step through all six positions without reaching the screen edge.</p>
+
+        <h3 class="wp-h3">3. Single-Click Parking</h3>
+        <p class="wp-p">A Shift-click on a full-size window instantly parks it at 50% scale in the nearest mid-zone — the equivalent of saying "I'm done with this for now, keep it visible." A subsequent Shift-click on any scaled window restores it to full size in the nearest centre slot. This two-state toggle covers the majority of daily window management without any dragging at all.</p>
+
+        <h2 class="wp-h2">Design Principles</h2>
+        <ul class="wp-ul">
+          <li><strong>No hidden state.</strong> Every window is always visible at some scale. Nothing disappears into a taskbar.</li>
+          <li><strong>Spatial consistency.</strong> A window's horizontal position predicts its scale. The mapping is learnable and predictable.</li>
+          <li><strong>Minimal friction.</strong> Common operations (park, restore, reorder) require at most one modified click.</li>
+          <li><strong>Graceful degradation.</strong> On narrower displays the plateau is wider and the edge zones are narrower, but the model is identical.</li>
+        </ul>
+
+        <h2 class="wp-h2">Open Questions</h2>
+        <p class="wp-p">Several aspects of the design remain under active investigation:</p>
+        <ul class="wp-ul">
+          <li>Should windows retain their snap-zone position across sessions, or always relaunch in the centre?</li>
+          <li>How should the model handle more than six or seven open windows simultaneously?</li>
+          <li>Is 50% the right scale for the mid-zone, or should it adapt to window content type?</li>
+          <li>Can the menubar centring toggle be extended to other chrome elements (dock, notifications)?</li>
+        </ul>
+
+        <h2 class="wp-h2">Next Steps</h2>
+        <p class="wp-p">The immediate priority is Phase B interactivity — routing pointer events through the WebGL raycaster into the source canvas so that buttons, links, and scroll areas inside each window respond to real input. Once that is in place, user testing sessions can begin with representative tasks across the four prototype application windows.</p>
+        <p class="wp-p">A secondary priority is the file-dragging interaction model: allowing content (documents, images, links) to be dragged between windows at different scale levels, with appropriate snap-back behaviour if the drop target is below a legibility threshold.</p>
+
+        <h2 class="wp-h2">Conclusion</h2>
+        <p class="wp-p">The ultra-wide display is not simply a wider version of the standard monitor. It represents a qualitative shift in the available spatial canvas — one that current window managers treat as an embarrassment of riches rather than an opportunity. The interaction model proposed here is a first step toward software that genuinely takes advantage of the extra space rather than merely accommodating it.</p>
+
+      </div>
+    </div>
+  </div>
+</div>

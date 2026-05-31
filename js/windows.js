@@ -224,6 +224,14 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   });
 
+  gl.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const top = stack[stack.length - 1];
+    if (!top?.scrollEl) return;
+    top.scrollEl.scrollTop += e.deltaY;
+    top.canvas.requestPaint?.();
+  }, { passive: false });
+
   window.addEventListener('mouseup', () => {
     if (drag?.shift && drag.activeZone !== null) {
       // Shift-drag: snap to highlighted zone, preserving current Y.

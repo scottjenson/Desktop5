@@ -84,6 +84,48 @@
             </div>
           </div>
         </div>
+
+        <div class="page-section-label" style="margin-top:28px;">Under The Hood</div>
+        <div class="page-h2">How HTMLTexture actually works</div>
+        <div class="page-p">At its core, <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">THREE.HTMLTexture</code> wraps a canvas element and hooks into its <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">onpaint</code> callback — a single-slot property that fires whenever the browser's layout engine decides the subtree needs re-rasterizing. When the callback fires, Three.js marks the texture as dirty and uploads the new bitmap to the GPU on the next render frame.</div>
+        <div class="page-p">One critical constraint: <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">onpaint</code> is a <strong>single-slot property</strong>, meaning only one listener can be registered per canvas. This is why every live window requires its own source canvas — sharing one canvas across multiple textures means only the last registered listener fires.</div>
+
+        <div class="page-h2">The multi-canvas architecture</div>
+        <div class="page-p">A production implementation would likely maintain a pool of off-screen source canvases, each rasterizing one window's DOM subtree. The visible WebGL canvas composites all of them into the final scene. Because each source canvas is independent, windows can animate, update content, and scroll without affecting one another.</div>
+        <div class="page-p">Depth ordering is handled entirely by mesh <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">position.z</code> values — no CSS z-index, no DOM reordering. Clicking a window moves it to the top of the stack by assigning it the highest z-slot; all other windows shift down by one slot to keep the range bounded.</div>
+
+        <div class="page-section-label" style="margin-top:28px;">Performance</div>
+        <div class="page-h2">What's fast, what's not</div>
+        <div class="page-p">Static windows are essentially free — the rasterized bitmap sits on the GPU and the render loop just draws it every frame with no CPU cost. Dynamic content (CSS transitions, animated text, live data) triggers repaints proportional to the canvas size. A 3440×1440 desktop chrome canvas repainting at 60fps is expensive; a 3440×39 menubar canvas is trivial.</div>
+        <div class="page-p">The practical rule: keep frequently-updating elements in small source canvases. Static chrome — wallpaper, dock, trash — can share a single large canvas that only repaints when explicitly requested (zone drag previews, for instance).</div>
+        <div class="page-cards">
+          <div class="page-card">
+            <div class="page-card-img" style="background:#fef9e7;">📐</div>
+            <div class="page-card-body">
+              <div class="page-card-title">Small canvas = fast</div>
+              <div class="page-card-desc">Menubar at 3440×39 repaints 55× cheaper than the full desktop</div>
+            </div>
+          </div>
+          <div class="page-card">
+            <div class="page-card-img" style="background:#f0f8ff;">🧱</div>
+            <div class="page-card-body">
+              <div class="page-card-title">Transform > layout</div>
+              <div class="page-card-desc">CSS transforms skip layout recalc; max-width changes do not</div>
+            </div>
+          </div>
+          <div class="page-card">
+            <div class="page-card-img" style="background:#f5f0ff;">🪟</div>
+            <div class="page-card-body">
+              <div class="page-card-title">One canvas per window</div>
+              <div class="page-card-desc">Enables independent live textures via the onpaint single-slot rule</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="page-section-label" style="margin-top:28px;">What's Next</div>
+        <div class="page-h2">The road to full interactivity</div>
+        <div class="page-p">The remaining challenge is routing input events back into the source canvas DOM. Because all pointer events land on the WebGL canvas, a raycaster must map screen coordinates to UV coordinates, then convert UV to window-local pixels, and finally dispatch synthetic events to the element under the cursor via <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">elementFromPoint</code>.</div>
+        <div class="page-p">Scrolling is already achievable by caching scrollable element references at init time and applying <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">scrollTop</code> deltas on wheel events. Hover states and clicks require the full synthetic event pipeline — expected to land in a future Chrome Canary build with improved <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-size:12px;">layoutsubtree</code> hit-testing support.</div>
       </div>
     </div>
   </div>

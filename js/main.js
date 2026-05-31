@@ -110,7 +110,12 @@ await Promise.all(sources.map(async (canvas, i) => {
 
   mesh.position.set((cx - DESKTOP_W / 2) * S, (DESKTOP_H / 2 - cy) * S, z);
 
-  windowMeshes.push({ mesh, w, h, id });
+  const scrollEl = [...canvas.querySelectorAll('*')].find(el => {
+    const oy = getComputedStyle(el).overflowY;
+    return oy === 'auto' || oy === 'scroll';
+  }) ?? null;
+
+  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl });
   scene.add(mesh);
 }));
 
