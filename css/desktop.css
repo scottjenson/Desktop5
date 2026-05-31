@@ -28,7 +28,7 @@
 #menubar .menu-item { font-weight: 500; opacity: 0.85; }
 #menubar .menu-item.bold { font-weight: 700; }
 #menubar .spacer { flex: 1; }
-#menubar .menu-right { display: flex; align-items: center; gap: 14px; font-size: 12px; opacity: 0.7; }
+#menubar .menu-right { display: flex; align-items: center; gap: 14px; font-size: 12px; }
 
 #dock {
   position: absolute;
@@ -40,7 +40,7 @@
   padding: 8px 12px;
   display: flex; gap: 6px; align-items: flex-end;
 }
-.dock-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.dock-item { display: flex; align-items: center; }
 .dock-icon {
   width: 52px; height: 52px;
   border-radius: 12px;
@@ -48,7 +48,6 @@
   font-size: 30px;
 }
 .dock-sep { width: 1px; height: 44px; background: rgba(255,255,255,0.3); align-self: center; margin: 0 4px; }
-.dock-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,0.7); }
 
 #trash {
   position: absolute;
