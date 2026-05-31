@@ -3,14 +3,14 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
-  PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP,
+  PLATEAU_FRAC, SHRINK_FRAC, SHRUNK_PX, SNAP_ZONE_STEP,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
 
 // Continuous scale as a function of horizontal position (used during normal drag).
 function scaleForCenterX(cx, info) {
-  const half = (PLATEAU_FRAC * DESKTOP_W) / 2;
+  const half = (SHRINK_FRAC * DESKTOP_W) / 2;
   const d = Math.abs(cx - DESKTOP_W / 2);
   if (d <= half) return 1;
   const t = Math.min((d - half) / (DESKTOP_W / 2 - half), 1);
@@ -132,6 +132,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
         shift: isShift,
         grabOffsetX: cx - cursorCx,
         topOffsetY:  windowTopY - cursorCy,
+        hasMoved: false,
         // Zone starts null — first SNAP_ZONE_STEP px of movement determines the
         // initial zone from cursor position, then ratchets ±1 from there.
         activeZone:   null,
@@ -148,6 +149,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
     raycaster.setFromCamera(ndc, camera);
     if (!raycaster.ray.intersectPlane(dragPlane, hit)) return;
 
+    drag.hasMoved = true;
     const { info } = drag;
     const cursorCx = worldToCenter(hit.x, 0).cx;
     const cursorCy = worldToCenter(0, hit.y).cy;
@@ -208,9 +210,26 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
 
   window.addEventListener('mouseup', () => {
     if (drag?.shift && drag.activeZone !== null) {
-      // Snap window to the highlighted zone, preserving current Y.
+      // Shift-drag: snap to highlighted zone, preserving current Y.
       const { info, mesh } = drag;
       const snap = snapForZone(drag.activeZone, info);
+      const halfH = (info.h * snap.scale) / 2;
+      const curCy = DESKTOP_H / 2 - mesh.position.y / S;
+      const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+      mesh.scale.set(snap.scale, snap.scale, 1);
+      const p = centerToWorld(snap.cx, cy);
+      mesh.position.x = p.x;
+      mesh.position.y = p.y;
+    } else if (drag?.shift && drag.activeZone === null && !drag.hasMoved) {
+      // Shift-click (no drag): toggle between full-size center and parked mid zone.
+      const { info, mesh } = drag;
+      const curScale = mesh.scale.x;
+      const curCx = worldToCenter(mesh.position.x, 0).cx;
+      const isLeftHalf = curCx < DESKTOP_W / 2;
+      const targetZone = curScale >= 0.95
+        ? (isLeftHalf ? 1 : 4)   // full-size → park at 50% mid zone
+        : (isLeftHalf ? 2 : 3);  // scaled → restore to full-size center zone
+      const snap = snapForZone(targetZone, info);
       const halfH = (info.h * snap.scale) / 2;
       const curCy = DESKTOP_H / 2 - mesh.position.y / S;
       const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
