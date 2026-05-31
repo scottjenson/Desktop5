@@ -2,12 +2,12 @@
 
 // Internal desktop resolution (ultrawide-ish). The WebGL canvas renders at this
 // size and is CSS-scaled to fit the viewport, producing black bars top/bottom.
-export const DESKTOP_W = 2560;
-export const DESKTOP_H = 1080;
+export const DESKTOP_W = 3440;
+export const DESKTOP_H = 1440;
 
 // Chrome dimensions (desktop px)
 export const TITLEBAR_H     = 30; // draggable strip at top of each window
-export const MENUBAR_H      = 26; // min margin when clamping a window
+export const MENUBAR_H      = 39; // min margin when clamping a window
 export const DOCK_CLEARANCE = 80; // keep windows above the dock
 
 // Camera / depth

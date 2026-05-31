@@ -3,7 +3,7 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --menubar-h: 26px;
+  --menubar-h: 39px;
   --titlebar-h: 30px;
   --accent: #0a84ff;
 }

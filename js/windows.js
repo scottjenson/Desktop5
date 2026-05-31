@@ -60,7 +60,7 @@ function snapForZone(index, info) {
 
 // ── Main ──────────────────────────────────────────────────
 
-export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
+export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const dragPlane = new THREE.Plane();
@@ -115,9 +115,10 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
 
     const localY = (1 - hits[0].uv.y) * info.h;
     const isShift = e.shiftKey;
+    const isIconSized = mesh.scale.x <= (SHRUNK_PX / info.w) * 1.1;
 
-    // Normal drag: titlebar only. Shift-drag: anywhere on the window.
-    if (localY <= TITLEBAR_H || isShift) {
+    // Normal drag: titlebar only. Shift-drag or icon-sized: anywhere on the window.
+    if (localY <= TITLEBAR_H || isShift || isIconSized) {
       dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), mesh.position);
       raycaster.ray.intersectPlane(dragPlane, hit);
 
@@ -197,6 +198,21 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc }) {
     const p = centerToWorld(cx, cy);
     drag.mesh.position.x = p.x;
     drag.mesh.position.y = p.y;
+  });
+
+  // "1" key: toggle menubar centering, driving repaints for the CSS transition.
+  const menuLeft  = document.getElementById('menu-left');
+  const menuRight = document.querySelector('#menubar .menu-right');
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '1') {
+      menuLeft.classList.toggle('centered');
+      menuRight.classList.toggle('centered');
+      const end = performance.now() + 450;
+      (function repaint() {
+        menubarSrc.requestPaint?.();
+        if (performance.now() < end) requestAnimationFrame(repaint);
+      })();
+    }
   });
 
   // Shift released mid-drag: cancel zone highlight, continue free drag.

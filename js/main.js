@@ -45,7 +45,23 @@ function htmlTexture(el) {
   return t;
 }
 
-// ── Static desktop chrome (wallpaper + menubar + dock + trash) ──
+// ── Menubar — own canvas/mesh so animation repaints only its 3440×26 bitmap ──
+const menubarSrc = document.getElementById('src-menubar');
+menubarSrc.style.width = DESKTOP_W + 'px';
+menubarSrc.style.height = MENUBAR_H + 'px';
+const menubarChrome = menubarSrc.querySelector('#menubar-chrome');
+menubarChrome.style.width = DESKTOP_W + 'px';
+menubarChrome.style.height = MENUBAR_H + 'px';
+
+const menubarMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(planeW, MENUBAR_H * S),
+  new THREE.MeshBasicMaterial({ map: htmlTexture(menubarChrome), transparent: true, depthWrite: false })
+);
+menubarMesh.position.set(0, (DESKTOP_H / 2 - MENUBAR_H / 2) * S, 0.005);
+menubarMesh.renderOrder = 1;
+scene.add(menubarMesh);
+
+// ── Static desktop chrome (wallpaper + dock + trash) ──
 const chromeDom = document.getElementById('desktop-chrome');
 chromeDom.style.width = DESKTOP_W + 'px';
 chromeDom.style.height = DESKTOP_H + 'px';
@@ -99,7 +115,7 @@ await Promise.all(sources.map(async (canvas, i) => {
 }));
 
 // ── Interaction ───────────────────────────────────────────
-initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome') });
+initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc });
 
 // ── Render loop ───────────────────────────────────────────
 (function animate() {
