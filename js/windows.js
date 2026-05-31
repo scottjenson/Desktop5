@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
-  PLATEAU_FRAC, SHRINK_FRAC, SHRUNK_PX, SNAP_ZONE_STEP,
+  PLATEAU_FRAC, SHRINK_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -49,10 +49,10 @@ function snapForZone(index, info) {
   const iconScale = SHRUNK_PX / info.w;
   const snaps = [
     { cx: SHRUNK_PX / 2,             scale: iconScale }, // icon-left
-    { cx: (_iW + _pL) / 2,           scale: 0.5       }, // mid-left
-    { cx: (_pL + _pM) / 2,           scale: 1         }, // left-center
-    { cx: (_pM + _pR) / 2,           scale: 1         }, // right-center
-    { cx: (_pR + DESKTOP_W - _iW) / 2, scale: 0.5     }, // mid-right
+    { cx: (_iW + _pL) / 2,             scale: MID_SCALE }, // mid-left
+    { cx: (_pL + _pM) / 2,             scale: 1         }, // left-center
+    { cx: (_pM + _pR) / 2,             scale: 1         }, // right-center
+    { cx: (_pR + DESKTOP_W - _iW) / 2, scale: MID_SCALE }, // mid-right
     { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // icon-right
   ];
   return snaps[index];
@@ -241,14 +241,35 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
   function parkAll() {
     parkedWindows = [];
+    const leftGroup = [];
+    const rightGroup = [];
+
     for (const w of stack) {
       if (w.mesh.scale.x < 0.95) continue;
       const curCx = worldToCenter(w.mesh.position.x, 0).cx;
       const curCy = DESKTOP_H / 2 - w.mesh.position.y / S;
       parkedWindows.push({ mesh: w.mesh, origX: w.mesh.position.x, origY: w.mesh.position.y, origScale: w.mesh.scale.x });
-      const snap = snapForZone(curCx < DESKTOP_W / 2 ? 1 : 4, w);
+      const zone = curCx < DESKTOP_W / 2 ? 1 : 4;
+      const snap = snapForZone(zone, w);
       const halfH = (w.h * snap.scale) / 2;
       const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+      (zone === 1 ? leftGroup : rightGroup).push({ w, snap, cy });
+    }
+
+    // Nudge overlapping windows downward within each side.
+    for (const group of [leftGroup, rightGroup]) {
+      group.sort((a, b) => a.cy - b.cy);
+      for (let i = 1; i < group.length; i++) {
+        const prev = group[i - 1];
+        const cur  = group[i];
+        const prevBottom = prev.cy + (prev.w.h * prev.snap.scale) / 2;
+        const curHalfH   = (cur.w.h  * cur.snap.scale)  / 2;
+        const minCy = prevBottom + 10 + curHalfH;
+        if (cur.cy < minCy) cur.cy = Math.min(minCy, DESKTOP_H - DOCK_CLEARANCE - curHalfH);
+      }
+    }
+
+    for (const { w, snap, cy } of [...leftGroup, ...rightGroup]) {
       const p = centerToWorld(snap.cx, cy);
       animateTo(w.mesh, p.x, p.y, snap.scale);
     }

@@ -21,3 +21,4 @@ export const PLATEAU_FRAC    = 0.5;  // central fraction used for zone layout & 
 export const SHRINK_FRAC     = 0.25; // central fraction that stays full-size during drag (steeper curve)
 export const SHRUNK_PX       = 110;  // ~icon target width (px) for a window at the edge
 export const SNAP_ZONE_STEP  = 100;  // px of horizontal movement to advance one snap zone
+export const MID_SCALE       = 0.5;  // scale for mid-zone parked windows (zones 1 and 4)
