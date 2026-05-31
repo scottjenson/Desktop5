@@ -102,6 +102,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
   // ── Input ───────────────────────────────────────────────
   gl.addEventListener('mousedown', (e) => {
+    if (parkTimer) { clearTimeout(parkTimer); parkTimer = null; }
     toNdc(e);
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(meshes, false);
@@ -109,6 +110,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
     const mesh = hits[0].object;
     const info = infoOf.get(mesh);
+
+    // Interacting during park state ends the session — leave all windows where they are.
+    if (parkedWindows.length) parkedWindows = [];
 
     const idx = stack.indexOf(info);
     if (idx !== -1) { stack.splice(idx, 1); stack.push(info); restack(); }
@@ -200,6 +204,63 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     drag.mesh.position.y = p.y;
   });
 
+  // ── Animation engine ─────────────────────────────────────
+  // Drives mesh lerps independently of the Three.js render loop.
+  const anims = [];
+
+  function animateTo(mesh, toX, toY, toScale, duration = 400) {
+    const existing = anims.findIndex(a => a.mesh === mesh);
+    if (existing !== -1) anims.splice(existing, 1);
+    anims.push({
+      mesh,
+      fromX: mesh.position.x, fromY: mesh.position.y, fromScale: mesh.scale.x,
+      toX, toY, toScale,
+      startTime: performance.now(), duration,
+    });
+    if (anims.length === 1) tickAnims();
+  }
+
+  function tickAnims() {
+    const now = performance.now();
+    for (let i = anims.length - 1; i >= 0; i--) {
+      const a = anims[i];
+      const t = Math.min((now - a.startTime) / a.duration, 1);
+      const e = 1 - Math.pow(1 - t, 3); // cubic ease-out
+      a.mesh.position.x = a.fromX + (a.toX - a.fromX) * e;
+      a.mesh.position.y = a.fromY + (a.toY - a.fromY) * e;
+      const s = a.fromScale + (a.toScale - a.fromScale) * e;
+      a.mesh.scale.set(s, s, 1);
+      if (t >= 1) anims.splice(i, 1);
+    }
+    if (anims.length > 0) requestAnimationFrame(tickAnims);
+  }
+
+  // ── Shift-hold park-all ───────────────────────────────────
+  let parkTimer = null;
+  let parkedWindows = []; // [{mesh, origX, origY, origScale}]
+
+  function parkAll() {
+    parkedWindows = [];
+    for (const w of stack) {
+      if (w.mesh.scale.x < 0.95) continue;
+      const curCx = worldToCenter(w.mesh.position.x, 0).cx;
+      const curCy = DESKTOP_H / 2 - w.mesh.position.y / S;
+      parkedWindows.push({ mesh: w.mesh, origX: w.mesh.position.x, origY: w.mesh.position.y, origScale: w.mesh.scale.x });
+      const snap = snapForZone(curCx < DESKTOP_W / 2 ? 1 : 4, w);
+      const halfH = (w.h * snap.scale) / 2;
+      const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+      const p = centerToWorld(snap.cx, cy);
+      animateTo(w.mesh, p.x, p.y, snap.scale);
+    }
+  }
+
+  function restoreAll() {
+    for (const pw of parkedWindows) {
+      animateTo(pw.mesh, pw.origX, pw.origY, pw.origScale);
+    }
+    parkedWindows = [];
+  }
+
   // "1" key: toggle menubar centering, driving repaints for the CSS transition.
   const menuLeft  = document.getElementById('menu-left');
   const menuRight = document.querySelector('#menubar .menu-right');
@@ -215,12 +276,18 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   });
 
-  // Shift released mid-drag: cancel zone highlight, continue free drag.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift' && !e.repeat && !drag) {
+      parkTimer = setTimeout(() => { parkTimer = null; parkAll(); }, 1000);
+    }
+  });
+
+  // Shift released: cancel park timer or restore parked windows; cancel zone highlight.
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Shift' && drag?.shift) {
-      drag.shift = false;
-      drag.activeZone = null;
-      hideZone();
+    if (e.key === 'Shift') {
+      if (parkTimer) { clearTimeout(parkTimer); parkTimer = null; }
+      if (parkedWindows.length) restoreAll();
+      if (drag?.shift) { drag.shift = false; drag.activeZone = null; hideZone(); }
     }
   });
 
