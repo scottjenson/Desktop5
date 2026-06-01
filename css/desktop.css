@@ -4,10 +4,7 @@
 #desktop-chrome {
   position: relative;
   width: 100%; height: 100%;
-  background:
-    radial-gradient(ellipse 120% 80% at 30% 110%, #1a3a6e 0%, transparent 55%),
-    radial-gradient(ellipse 80% 60% at 80% -10%, #0d2040 0%, transparent 50%),
-    linear-gradient(160deg, #0d1b3e 0%, #1a2d5a 40%, #0a1428 100%);
+  /* No background — the WebGL shader plane provides the desktop background. */
   overflow: hidden;
   user-select: none;
 }

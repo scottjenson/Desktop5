@@ -3,19 +3,23 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
-  PLATEAU_FRAC, SHRINK_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE,
+  PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE,
+  WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
 
-// Continuous scale as a function of horizontal position (used during normal drag).
-function scaleForCenterX(cx, info) {
-  const half = (SHRINK_FRAC * DESKTOP_W) / 2;
-  const d = Math.abs(cx - DESKTOP_W / 2);
-  if (d <= half) return 1;
-  const t = Math.min((d - half) / (DESKTOP_W / 2 - half), 1);
-  const ts = t * t * (3 - 2 * t); // smoothstep
-  return 1 - ts * (1 - SHRUNK_PX / info.w);
+// Window scale as a function of normalized horizontal position (xPos ∈ -1..1, 0 = centre).
+// This is the exact analytical derivative of the background grid's warp curve
+// (gridX = x + sign(x)·flankDist^power·strength): the window shrinks at precisely the
+// rate the grid compresses. Dials live in config.js and are shared with the shader,
+// so the two physics can never drift. Width-independent — every window shrinks to the
+// same factor at a given x (≈1/6 at the screen edge with the default dials).
+function getWindowScale(xPos) {
+  const flankDist = Math.max(0, Math.abs(xPos) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
+  const innerDeriv = 1 / (1 - WARP_DEADZONE);
+  const derivative = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH * innerDeriv;
+  return 1 / (1 + derivative);
 }
 
 // Zone highlight rectangles — 6 zones from left to right.
@@ -84,6 +88,8 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
   const centerToWorld = (cx, cy) => ({ x: (cx - DESKTOP_W / 2) * S, y: (DESKTOP_H / 2 - cy) * S });
   const worldToCenter = (x, y) => ({ cx: x / S + DESKTOP_W / 2, cy: DESKTOP_H / 2 - y / S });
+  // Desktop-px center X → normalized -1..1 (matches the shader's centerX space).
+  const cxToNorm = (cx) => (cx - DESKTOP_W / 2) / (DESKTOP_W / 2);
 
   // ── Zone overlay ────────────────────────────────────────
   const overlay = document.getElementById('snap-zone-overlay');
@@ -161,10 +167,10 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
     // X: free drag (same formula for both normal and shift).
     let cx = cursorCx + drag.grabOffsetX;
-    let scale = scaleForCenterX(cx, info);
+    let scale = getWindowScale(cxToNorm(cx));
     const halfW = (info.w * scale) / 2;
     cx = Math.min(Math.max(cx, halfW), DESKTOP_W - halfW);
-    scale = scaleForCenterX(cx, info);
+    scale = getWindowScale(cxToNorm(cx));
 
     // Y: anchor window top to cursor, hard clamped.
     const halfH = (info.h * scale) / 2;

@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── CSS custom properties (derived from config.js) ────────
@@ -21,11 +21,13 @@ r.setProperty('--snap-height', (DESKTOP_H - MENUBAR_H - DOCK_CLEARANCE) + 'px');
 const gl = document.getElementById('gl');
 const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true });
 renderer.setSize(DESKTOP_W, DESKTOP_H, false); // fixed buffer; CSS handled below
-// Render at device resolution so the fitted canvas isn't upscaled (clamped to 2×).
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Fixed supersample, deliberately NOT tied to devicePixelRatio: a projector reports
+// dpr 1 and would quarter the buffer, under-resolving the dense grid flanks. We render
+// large (DESKTOP × RENDER_SUPERSAMPLE) and let CSS downscale → projector-proof crispness.
+renderer.setPixelRatio(RENDER_SUPERSAMPLE);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
+scene.background = null; // shader plane handles the background
 
 // Camera aspect is locked to the desktop ratio, so the texture is never stretched.
 const camera = new THREE.PerspectiveCamera(FOV, DESKTOP_W / DESKTOP_H, 0.1, 100);
@@ -45,6 +47,117 @@ const fovRad = THREE.MathUtils.degToRad(FOV);
 const planeH = 2 * Math.tan(fovRad / 2) * CAMERA_Z;
 const planeW = planeH * (DESKTOP_W / DESKTOP_H);
 const S = planeH / DESKTOP_H; // world units per desktop px (uniform in x and y)
+
+// ── Background grid shader ─────────────────────────────────
+// Renders the UX Tension Grid as the desktop background.
+// The grid's X coordinate is warped by an analytical power curve
+//   gridX = x + sign(x)·flankDist^power·strength
+// whose derivative (1 + derivative) sets the local density. The same `derivative`
+// drives getWindowScale() in windows.js — so the grid compresses at exactly the rate
+// windows shrink. The dials (u_deadZone/power/strength) come from config.js, the single
+// shared source of truth. fwidth() keeps lines ~1.5 device-px regardless of density.
+const _vertSrc = /* glsl */`
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const _fragSrc = /* glsl */`
+  uniform float u_freqX;        // grid cells across full width  (DESKTOP_W / GRID_CELL_PX)
+  uniform float u_freqY;        // grid cells across full height (DESKTOP_H / GRID_CELL_PX)
+  uniform float u_deadZone;     // |x| (in -1..1) of the un-warped centre focus zone
+  uniform float u_warpPower;    // 2.0 quadratic … 3.0 cubic
+  uniform float u_warpStrength; // total spatial compression per flank
+  uniform float u_coreWidth;    // crisp line core half-width (screen px)
+  uniform float u_glowWidth;    // soft glow falloff radius (screen px)
+  uniform float u_glowStrength; // glow halo brightness (0..1)
+  uniform float u_edgeFadeStart;// |centerX| where the edge fade begins (→0 at the edge)
+  uniform vec3  u_bgColor;
+  uniform vec3  u_lineColor;    // crisp core colour (near-white)
+  uniform vec3  u_glowColor;    // tinted halo colour (theme accent)
+  varying vec2 vUv;
+
+  void main() {
+    // Normalized screen space, -1..1, centre at 0 (matches windows.js xPos).
+    float centerX = (vUv.x - 0.5) * 2.0;
+    float centerY = (vUv.y - 0.5) * 2.0;
+
+    // 0 at the dead-zone boundary, 1 at the screen edge.
+    float flankDist = max(0.0, abs(centerX) - u_deadZone) / (1.0 - u_deadZone);
+
+    // X warp: push the coordinate outward by the power curve (integral of the density).
+    float warp = pow(flankDist, u_warpPower) * u_warpStrength;
+    float gridXcoord = centerX + sign(centerX) * warp;
+
+    // Local scale = inverse of the warp's analytical derivative. Identical math to
+    // getWindowScale() in windows.js, so window size and grid density stay locked.
+    float innerDeriv = 1.0 / (1.0 - u_deadZone);
+    float derivative = u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0)) * u_warpStrength * innerDeriv;
+    float localScale = 1.0 / (1.0 + derivative);
+
+    // Y has no warp, so compress it by 1/localScale to keep cells perfectly square.
+    float gridYcoord = centerY / localScale;
+
+    // Continuous grid coordinates in cell units (·0.5 because centerX/Y span 2 units).
+    // u_freqX/u_freqY carry the desktop aspect (DESKTOP_W/H ÷ cell), so cells stay square.
+    vec2 gridUv = vec2(gridXcoord * u_freqX, gridYcoord * u_freqY) * 0.5;
+
+    // Distance to the nearest grid line, in screen pixels (÷fwidth: cell-space → px).
+    vec2 gridDist = abs(fract(gridUv - 0.5) - 0.5) / fwidth(gridUv);
+    float line = min(gridDist.x, gridDist.y);
+
+    // Each line = a crisp near-white CORE + a soft tinted GLOW halo, both sized in px so
+    // they stay consistent at any compression. The glow downscales gracefully on a
+    // projector where a 1px core would flicker, and in the dense flanks the always-near
+    // line keeps the glow lit → the compressed edges read as a luminous band, not aliasing.
+    float core = 1.0 - smoothstep(0.0, u_coreWidth, line);
+    float glow = exp(-line / u_glowWidth) * u_glowStrength;
+
+    // Safety net: where cells compress past ~Nyquist, fade only the hard CORE (which
+    // would alias). The soft glow stays, so dense flanks dissolve into light, not shimmer.
+    float density = length(fwidth(gridUv));
+    core *= 1.0 - smoothstep(0.35, 0.7, density);
+
+    // Edge fade: ease the whole line intensity to 0 toward the left/right edges so the
+    // bright, compressed flanks vignette out instead of dominating. Full through centre.
+    float edgeFade = 1.0 - smoothstep(u_edgeFadeStart, 1.0, abs(centerX));
+    core *= edgeFade;
+    glow *= edgeFade;
+
+    // Composite on the dark background: additive tinted glow, crisp core on top.
+    vec3 col = u_bgColor;
+    col += u_glowColor * glow;
+    col = mix(col, u_lineColor, core);
+
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+  }
+`;
+
+const bgMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(planeW, planeH),
+  new THREE.ShaderMaterial({
+    uniforms: {
+      u_freqX:        { value: DESKTOP_W / GRID_CELL_PX },
+      u_freqY:        { value: DESKTOP_H / GRID_CELL_PX },
+      u_deadZone:     { value: WARP_DEADZONE },
+      u_warpPower:    { value: WARP_POWER },
+      u_warpStrength: { value: WARP_STRENGTH },
+      u_coreWidth:    { value: GRID_LINE_CORE_PX },
+      u_glowWidth:    { value: GRID_LINE_GLOW_PX },
+      u_glowStrength: { value: GRID_GLOW_STRENGTH },
+      u_edgeFadeStart:{ value: GRID_EDGE_FADE_START },
+      u_bgColor:      { value: new THREE.Color(0x0d1b3e) },
+      u_lineColor:    { value: new THREE.Color(0xe6eeff) }, // crisp cool-white core
+      u_glowColor:    { value: new THREE.Color(0x0a84ff) }, // theme accent halo
+    },
+    vertexShader:   _vertSrc,
+    fragmentShader: _fragSrc,
+  })
+);
+bgMesh.position.z = -0.005;
+scene.add(bgMesh);
 
 function htmlTexture(el) {
   const t = new THREE.HTMLTexture(el);
@@ -75,7 +188,7 @@ chromeDom.style.height = DESKTOP_H + 'px';
 
 const chrome = new THREE.Mesh(
   new THREE.PlaneGeometry(planeW, planeH),
-  new THREE.MeshBasicMaterial({ map: htmlTexture(chromeDom) })
+  new THREE.MeshBasicMaterial({ map: htmlTexture(chromeDom), transparent: true })
 );
 chrome.position.z = 0;
 scene.add(chrome);
