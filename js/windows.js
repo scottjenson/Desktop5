@@ -64,7 +64,7 @@ function snapForZone(index, info) {
 
 // ── Main ──────────────────────────────────────────────────
 
-export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc }) {
+export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const dragPlane = new THREE.Plane();
@@ -106,6 +106,40 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     chromeSrc.requestPaint?.();
   }
 
+  // ── Music player ─────────────────────────────────────────
+  const BAR_FREQS  = [0.9, 1.4, 0.7, 1.2, 0.85, 1.55, 1.0];
+  const BAR_PHASES = [0, 1.1, 2.3, 0.7, 1.85, 0.4, 2.9];
+  const BAR_MIN = 4, BAR_MAX = 28;
+  let musicPlaying = false;
+  let musicAnimId  = null;
+  const musicInfo  = windowMeshes.find(w => w.id === 'music');
+
+  function animateBars() {
+    const t = performance.now() / 1000;
+    for (let i = 0; i < musicInfo.barEls.length; i++) {
+      const h = BAR_MIN + (BAR_MAX - BAR_MIN) * (0.5 + 0.5 * Math.sin(t * BAR_FREQS[i] * Math.PI * 2 + BAR_PHASES[i]));
+      musicInfo.barEls[i].style.height = h + 'px';
+      musicInfo.barEls[i].style.opacity = '1';
+    }
+    musicInfo.canvas.requestPaint?.();
+    if (musicPlaying) musicAnimId = requestAnimationFrame(animateBars);
+  }
+
+  function togglePlay() {
+    musicPlaying = !musicPlaying;
+    musicInfo.playBtnEl.textContent = musicPlaying ? '⏸' : '▶';
+    if (musicPlaying) {
+      if (musicAnimId) cancelAnimationFrame(musicAnimId);
+      animateBars();
+    } else {
+      for (const bar of musicInfo.barEls) {
+        bar.style.height = BAR_MIN + 'px';
+        bar.style.opacity = '0.15';
+      }
+      musicInfo.canvas.requestPaint?.();
+    }
+  }
+
   // ── Input ───────────────────────────────────────────────
   gl.addEventListener('mousedown', (e) => {
     if (parkTimer) { clearTimeout(parkTimer); parkTimer = null; }
@@ -122,6 +156,18 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
     const idx = stack.indexOf(info);
     if (idx !== -1) { stack.splice(idx, 1); stack.push(info); restack(); }
+
+    // Music play button hit detection (body click, not a drag).
+    if (info.playHitRect && !e.shiftKey) {
+      const hitX = hits[0].uv.x * info.w;
+      const hitY = (1 - hits[0].uv.y) * info.h;
+      const r = info.playHitRect;
+      if (hitX >= r.x && hitX <= r.x + r.w && hitY >= r.y && hitY <= r.y + r.h) {
+        togglePlay();
+        e.preventDefault();
+        return;
+      }
+    }
 
     const localY = (1 - hits[0].uv.y) * info.h;
     const isShift = e.shiftKey;
@@ -165,12 +211,19 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     const cursorCx = worldToCenter(hit.x, 0).cx;
     const cursorCy = worldToCenter(0, hit.y).cy;
 
-    // X: free drag (same formula for both normal and shift).
+    // X: free drag with self-consistent clamp.
+    // scale depends on cx, so halfW depends on cx — a single-pass clamp undershoots
+    // (the clamped position is less compressed → larger halfW → edge overshoots 0).
+    // Iterate to convergence: typically done in 3–4 steps.
     let cx = cursorCx + drag.grabOffsetX;
-    let scale = getWindowScale(cxToNorm(cx));
-    const halfW = (info.w * scale) / 2;
-    cx = Math.min(Math.max(cx, halfW), DESKTOP_W - halfW);
-    scale = getWindowScale(cxToNorm(cx));
+    for (let i = 0; i < 5; i++) {
+      const s = getWindowScale(cxToNorm(cx));
+      const hw = (info.w * s) / 2;
+      const clamped = Math.min(Math.max(cx, hw), DESKTOP_W - hw);
+      if (Math.abs(clamped - cx) < 0.05) { cx = clamped; break; }
+      cx = clamped;
+    }
+    const scale = getWindowScale(cxToNorm(cx));
 
     // Y: anchor window top to cursor, hard clamped.
     const halfH = (info.h * scale) / 2;
@@ -303,9 +356,30 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   });
 
+  // "2" key: reveal/hide the grid background with a vertical door-open animation.
+  let gridOpen = false;
+  let revealAnimId = null;
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '2') {
+      gridOpen = !gridOpen;
+      const from = revealUniform.value;
+      const to   = gridOpen ? 1.0 : 0.0;
+      const duration = 600;
+      const start = performance.now();
+      if (revealAnimId) cancelAnimationFrame(revealAnimId);
+      (function tick() {
+        const t = Math.min((performance.now() - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
+        revealUniform.value = from + (to - from) * eased;
+        if (t < 1) revealAnimId = requestAnimationFrame(tick);
+        else revealAnimId = null;
+      })();
+    }
+  });
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Shift' && !e.repeat && !drag) {
-      parkTimer = setTimeout(() => { parkTimer = null; parkAll(); }, 1000);
+      parkTimer = setTimeout(() => { parkTimer = null; parkAll(); }, 500);
     }
   });
 

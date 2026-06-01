@@ -403,6 +403,11 @@
   padding: 16px 24px;
   display: flex; align-items: center; gap: 14px;
 }
+.music-play-hit {
+  width: 80px; height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: default;
+}
 .music-play-btn {
   width: 36px; height: 36px;
   border-radius: 50%;
@@ -411,8 +416,22 @@
   font-size: 16px;
   cursor: default;
   color: #000;
+  flex-shrink: 0;
 }
 .music-ctrl-btn { font-size: 18px; color: #b3b3b3; cursor: default; }
+.music-visualizer {
+  display: flex; align-items: flex-end;
+  gap: 5px;
+  height: 36px;
+  padding: 0 24px 6px;
+  flex-shrink: 0;
+}
+.music-bar {
+  width: 8px; height: 4px;
+  background: #1db954;
+  border-radius: 2px 2px 0 0;
+  opacity: 0.15;
+}
 .music-ctrl-btn:hover { color: #fff; }
 .music-progress { flex: 1; display: flex; align-items: center; gap: 8px; }
 .music-time { font-size: 11px; color: #b3b3b3; min-width: 28px; }

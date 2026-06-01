@@ -75,7 +75,9 @@ const _fragSrc = /* glsl */`
   uniform float u_glowStrength; // glow halo brightness (0..1)
   uniform float u_edgeFadeStart;// |centerX| where the edge fade begins (→0 at the edge)
   uniform float u_gridIntensity;// global scale on core + glow (0.5 = half brightness)
+  uniform float u_reveal;       // 0 = doors closed (plain blue), 1 = fully open (grid)
   uniform vec3  u_bgColor;
+  uniform vec3  u_doorColor;    // plain backdrop shown before reveal
   uniform vec3  u_lineColor;    // crisp core colour (near-white)
   uniform vec3  u_glowColor;    // tinted halo colour (theme accent)
   varying vec2 vUv;
@@ -133,7 +135,12 @@ const _fragSrc = /* glsl */`
     col += u_glowColor * glow * u_gridIntensity;
     col = mix(col, u_lineColor, core * u_gridIntensity);
 
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    // Door reveal: two doors split left/right from centre as u_reveal goes 0→1.
+    // Hard step closes the seam completely — smoothstep bleeds grid through at center.
+    float doorT = step(u_reveal, abs(centerX));
+    vec3 finalCol = mix(clamp(col, 0.0, 1.0), u_doorColor, doorT);
+
+    gl_FragColor = vec4(finalCol, 1.0);
   }
 `;
 
@@ -151,7 +158,9 @@ const bgMesh = new THREE.Mesh(
       u_glowStrength: { value: GRID_GLOW_STRENGTH },
       u_edgeFadeStart:{ value: GRID_EDGE_FADE_START },
       u_gridIntensity:{ value: GRID_INTENSITY },
+      u_reveal:       { value: 0.0 },
       u_bgColor:      { value: new THREE.Color(0x0d1b3e) },
+      u_doorColor:    { value: new THREE.Color(0x1e5fa4) }, // macOS medium blue
       u_lineColor:    { value: new THREE.Color(0xe6eeff) }, // crisp cool-white core
       u_glowColor:    { value: new THREE.Color(0x0a84ff) }, // theme accent halo
     },
@@ -238,12 +247,26 @@ await Promise.all(sources.map(async (canvas, i) => {
     return oy === 'auto' || oy === 'scroll';
   }) ?? null;
 
-  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl });
+  // Music window: cache play button hit area and bar elements before layoutsubtree
+  // hides the DOM after first paint.
+  let playHitRect = null, playBtnEl = null, barEls = null;
+  if (id === 'music') {
+    const hitEl = canvas.querySelector('.music-play-hit');
+    playBtnEl   = canvas.querySelector('.music-play-btn');
+    barEls      = [...canvas.querySelectorAll('.music-bar')];
+    if (hitEl) {
+      const cr = canvas.getBoundingClientRect();
+      const hr = hitEl.getBoundingClientRect();
+      playHitRect = { x: hr.left - cr.left, y: hr.top - cr.top, w: hr.width, h: hr.height };
+    }
+  }
+
+  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl, playHitRect, playBtnEl, barEls });
   scene.add(mesh);
 }));
 
 // ── Interaction ───────────────────────────────────────────
-initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc });
+initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal });
 
 // ── Render loop ───────────────────────────────────────────
 (function animate() {
