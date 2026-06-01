@@ -341,14 +341,16 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     parkedWindows = [];
   }
 
-  // "1" key: toggle menubar centering, driving repaints for the CSS transition.
+  // "1" key: toggle menubar centering + pill shape, driving repaints for CSS transitions.
   const menuLeft  = document.getElementById('menu-left');
   const menuRight = document.querySelector('#menubar .menu-right');
+  const menubar   = document.getElementById('menubar');
   window.addEventListener('keydown', (e) => {
     if (e.key === '1') {
       menuLeft.classList.toggle('centered');
       menuRight.classList.toggle('centered');
-      const end = performance.now() + 450;
+      menubar.classList.toggle('centered');
+      const end = performance.now() + 500;
       (function repaint() {
         menubarSrc.requestPaint?.();
         if (performance.now() < end) requestAnimationFrame(repaint);

@@ -37,6 +37,14 @@
   font-size: 16px;
   color: #000000;
   overflow: hidden;
+  clip-path: inset(0 0 0 0 round 0px);
+  transition: clip-path 0.4s ease, background 0.4s ease, color 0.4s ease, border-bottom-color 0.4s ease;
+}
+#menubar.centered {
+  clip-path: inset(0 860px 0 860px round 19px);
+  background: rgba(22, 22, 22, 0.92);
+  color: #fff;
+  border-bottom-color: transparent;
 }
 #menu-left {
   display: flex; align-items: center; gap: 18px;
