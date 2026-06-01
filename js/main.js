@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_INTENSITY } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── CSS custom properties (derived from config.js) ────────
@@ -74,6 +74,7 @@ const _fragSrc = /* glsl */`
   uniform float u_glowWidth;    // soft glow falloff radius (screen px)
   uniform float u_glowStrength; // glow halo brightness (0..1)
   uniform float u_edgeFadeStart;// |centerX| where the edge fade begins (→0 at the edge)
+  uniform float u_gridIntensity;// global scale on core + glow (0.5 = half brightness)
   uniform vec3  u_bgColor;
   uniform vec3  u_lineColor;    // crisp core colour (near-white)
   uniform vec3  u_glowColor;    // tinted halo colour (theme accent)
@@ -126,10 +127,11 @@ const _fragSrc = /* glsl */`
     core *= edgeFade;
     glow *= edgeFade;
 
-    // Composite on the dark background: additive tinted glow, crisp core on top.
+    // Composite: additive tinted glow, crisp core on top.
+    // u_gridIntensity dials down the entire grid by a global factor.
     vec3 col = u_bgColor;
-    col += u_glowColor * glow;
-    col = mix(col, u_lineColor, core);
+    col += u_glowColor * glow * u_gridIntensity;
+    col = mix(col, u_lineColor, core * u_gridIntensity);
 
     gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
   }
@@ -148,6 +150,7 @@ const bgMesh = new THREE.Mesh(
       u_glowWidth:    { value: GRID_LINE_GLOW_PX },
       u_glowStrength: { value: GRID_GLOW_STRENGTH },
       u_edgeFadeStart:{ value: GRID_EDGE_FADE_START },
+      u_gridIntensity:{ value: GRID_INTENSITY },
       u_bgColor:      { value: new THREE.Color(0x0d1b3e) },
       u_lineColor:    { value: new THREE.Color(0xe6eeff) }, // crisp cool-white core
       u_glowColor:    { value: new THREE.Color(0x0a84ff) }, // theme accent halo

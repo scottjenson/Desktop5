@@ -47,3 +47,4 @@ export const GRID_LINE_CORE_PX = 1.5; // core half-width: crisp center of each l
 export const GRID_LINE_GLOW_PX = 6.0; // glow falloff radius around each line
 export const GRID_GLOW_STRENGTH = 0.5; // 0..1 brightness of the glow halo
 export const GRID_EDGE_FADE_START = 0.65; // |x| (normalized -1..1) where lines begin fading; 0 at the very edge
+export const GRID_INTENSITY    = 0.5;  // global multiplier on core + glow (1.0 = full, 0.5 = half)

@@ -7,7 +7,7 @@ The ultimate payoff is making this grid react dynamically when the user drags a 
 
 ---
 
-## 📐 Phase 1: The Anamorphic Base Grid & Math Alignment
+## 📐 Phase 1: The Anamorphic Base Grid & Math Alignment  (✅ DONE)
 **Objective:** Create the base grid and ensure the visual warping exactly matches the physical window scaling logic.
 
 1.  **Define the Zones:** Split the screen `uv.x` into a Center Focus Column. The current prototype as a "centered menu bar" (tied to the "1" keyhandler) and a separate central area where all dragging is just a simple movement. When the user drags out of this central area, the windows starts to scale down. The first step is to unify the size of the centered menu bar with this central drag area. They much line up perfectly.
@@ -18,7 +18,7 @@ The ultimate payoff is making this grid react dynamically when the user drags a 
 
 ---
 
-## 🎨 Phase 2: Aesthetics, Colors & Stage Lighting
+## 🎨 Phase 2: Aesthetics, Colors & Stage Lighting  (✅ DONE — except the vertical stage-lighting gradient, item 2)
 **Objective:** Make the grid look like a premium, subtle OS background.
 
 1.  **Subtlety & Anti-Aliasing:** * Base the grid color on a uniform (derived from our CSS theme).
@@ -48,3 +48,47 @@ Instead of just global warping, make the grid lines denser (smaller grid squares
 * Pass a `u_dragIntensity` uniform that increases as the window gets closer to the screen bezel.
 * In the fragment shader, multiply the grid's scale factor (the number inside the `fract()` function) based on the distance to `u_dragPos` and the `u_dragIntensity`. 
 * **The Effect:** The user drags the window toward the edge, and the grid specifically underneath the window pinches and multiplies, visibly reacting to the "weight" and "squeeze" of the window parking itself.
+
+---
+
+## 🧠 Learnings — Phases 1 & 2 (built & confirmed on-screen)
+
+Hard-won notes from actually shipping the grid. All shader code lives inline in `js/main.js` (`_fragSrc`); all dials live in `js/config.js`.
+
+**1. Harmony = analytical derivative, NOT numerical integration.**
+The grid warps X with a power curve, and the window scale is the *exact analytical derivative* of that curve — no integration loop in the shader.
+* Grid warp: `gridX = centerX + sign(centerX) · flankDist^WARP_POWER · WARP_STRENGTH`
+* Window scale / grid density: `localScale = 1 / (1 + derivative)`, where `derivative = WARP_POWER · flankDist^(WARP_POWER−1) · WARP_STRENGTH · innerDeriv` and `innerDeriv = 1/(1−WARP_DEADZONE)`.
+The shader uses `1/localScale` to set grid density; `getWindowScale()` in `windows.js` uses `localScale` directly. Same formula, so grid compression and window shrink are locked by construction.
+
+**2. Single source of truth for the dials (they MUST NOT drift).**
+`WARP_DEADZONE`, `WARP_POWER`, `WARP_STRENGTH` live only in `config.js`, imported by **both** the shader uniforms (`main.js`) and `getWindowScale()` (`windows.js`). Change one number, both the grid and the window physics move together. Don't hardcode them in the shader.
+
+**3. Work in normalized −1..1 screen space, not vUv −0.5..0.5.**
+`centerX = (vUv.x − 0.5) · 2.0`. The `flankDist` formula divides by `(1 − deadZone)` and only reaches 1.0 at `|centerX| = 1` (the screen edge). Using −0.5..0.5 silently caps `flankDist` at ~0.375 and the warp never completes. JS `getWindowScale(xPos)` uses the same −1..1 convention (`cxToNorm`).
+
+**4. Aspect ratio = per-axis frequencies, NEVER `window.innerWidth/innerHeight`.**
+`u_freqX = DESKTOP_W/GRID_CELL_PX`, `u_freqY = DESKTOP_H/GRID_CELL_PX` keep cells square in **desktop** space. The desktop is a fixed 3440×1440 letterboxed through a locked-aspect camera, so browser-window aspect is wrong — it distorts cells and reshapes them on every resize.
+
+**5. Dead zone = 0.5 unifies everything.** Center 50% (1720px) stays orthogonal, matching `PLATEAU_FRAC`, the centered-menubar shift, and the snap "center zones." `GRID_CELL_PX = 86` → exactly 40 columns across 3440px (clean subdivision). NB: integer-px alignment is moot because the canvas is CSS-letterbox-scaled — desktop-px never map 1:1 to device-px.
+
+**6. Use cubic (WARP_POWER = 3), not quadratic, for a kink-free bend.**
+Quadratic has a constant nonzero 2nd derivative at the boundary → a visible corner where horizontal lines cross into the flank. Cubic gives `w''(0)=0` → C²-smooth bend. `WARP_STRENGTH = 1.33` compensates so the edge `localScale ≈ 1/9` (matches the old power-2 feel: `3·1.33·2·innerDeriv ≈ 8`).
+
+**7. Anti-aliasing = analytical pixel-distance filter, not naive `fract`+`smoothstep`.**
+`gridDist = abs(fract(gridUv − 0.5) − 0.5) / fwidth(gridUv)` measures distance to the nearest line **in screen pixels**, giving constant-width lines at any compression. This is what finally killed the Moiré in the dense flanks; `step()`/plain `smoothstep` on the raw fract aliased badly.
+
+**8. Glow lines beat both 1px lines and bloom (Phase 2 line look).**
+Each line = a crisp near-white **core** (`1 − smoothstep(0, coreWidth, line)`) + a soft analytic **glow** halo (`exp(−line/glowWidth)·glowStrength`), composited additively on the dark bg, all in the *same* fragment shader. No `EffectComposer`/`UnrealBloomPass` needed (would add a second pass + a build-ish layer to a no-build project). The glow also downsamples far more gracefully on a low-res projector than a 1px line, and turns dense flanks into a luminous wash instead of shimmer.
+* Dials: `GRID_LINE_CORE_PX=1.5`, `GRID_LINE_GLOW_PX=6.0`, `GRID_GLOW_STRENGTH=0.5`; colors `u_lineColor=#e6eeff`, `u_glowColor=#0a84ff` (theme accent).
+
+**9. Moiré fade hits the CORE only, not the glow.**
+`core *= 1 − smoothstep(0.35, 0.7, density)` where `density = length(fwidth(gridUv))`. Past ~Nyquist the hard cores (which alias) fade out, but the soft glow persists — so compressed flanks dissolve into light rather than crawling.
+
+**10. Edge vignette fade tames the bright flanks.**
+The glow staying lit made the compressed edges read *too* bright. `edgeFade = 1 − smoothstep(GRID_EDGE_FADE_START, 1.0, abs(centerX))` (default 0.65) eases both core and glow to 0 toward the L/R edges. Full strength through the center, vignettes out at the periphery.
+
+**11. ⭐ The root "scaling issue": supersample, decoupled from `devicePixelRatio`.**
+This was the thing being fought the whole time. Grid crispness depends on draw-buffer pixels, and `setPixelRatio(min(devicePixelRatio, 2))` ties that to the **display** — a projector reports `dpr = 1`, which *quarters* the buffer (6880×2880 → 3440×1440) and under-resolves the dense flanks. **Fix:** `renderer.setPixelRatio(RENDER_SUPERSAMPLE)` with a **fixed** factor (currently 2). The canvas is CSS-fit to the viewport regardless, so we render large and let the browser **downscale = supersampling** → projector-proof. Rule: **the WebGL draw buffer is independent of the display; for a fixed-resolution stage like a projector, set it explicitly and supersample rather than mirroring `devicePixelRatio`.** Bump to 2.5–3 for more crispness if the GPU holds 60fps.
+
+**Still open in Phase 2:** the vertical "stage lighting" gradient (brightest at top-center/bottom-center to anchor the menubar & dock, fading toward the flanks) — item 2 above, not yet built. Phase 3 (dynamic drag tension) not started.
