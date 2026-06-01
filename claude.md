@@ -107,13 +107,17 @@ The shift-hold-1s park gesture moves all full-size windows to 50% mid-zones. Whe
 **9. Cache scrollable DOM refs at init — `layoutsubtree` hides the DOM at runtime.**
 After the first `onpaint`, Chrome moves source-canvas child nodes into an internal tree; `canvas.querySelectorAll('*')` returns 0 elements at runtime. Scroll routing works by caching `scrollEl` references in `main.js` at init time (while the DOM is still accessible) and storing them on each `windowMeshes` entry. Wheel events on `#gl` then route `deltaY` to `top.scrollEl.scrollTop` directly. **Do not try to query source-canvas DOM after initialization.**
 
+**10. `layoutsubtree` canvas pointer-event hit-testing is broken under CSS transforms in Chrome Canary.**
+We attempted a "CSS proxy layer" — moving source canvases into a visible overlay and using CSS transforms to align them with WebGL meshes, so the browser would handle scroll/click/hover natively. Visual alignment was achievable (confirmed with red-glass debug overlay), but **pointer-event hit regions did not follow the transform** regardless of approach: `matrix3d` on the canvas itself, `left/top` inside a `scale()`-transformed parent, `position:fixed` with viewport coords, and `CSS3DRenderer` (which puts `matrix3d` on a wrapper div) all failed. The Chrome Canary `layoutsubtree` implementation does not correctly apply CSS transforms to its hit-testing model. **Do not re-attempt this.** The correct Phase B approach remains: raycaster `uv` → window-local px → `elementFromPoint` → synthetic events.
+
 ---
 ## 🚨 Anti-Patterns (DO NOT DO THESE)
 1. **Do NOT** put all windows in one `layoutsubtree` canvas expecting independent live textures — `onpaint` is single-slot. One source canvas per window.
 2. **Do NOT** fake per-window depth with CSS `transform`/`opacity`; use real `mesh.position.z` (Learning #4).
 3. **Do NOT** stack windows with a monotonically increasing z (Learning #3).
 4. **Do NOT** size source DOM with `%` (Learning #1).
-5. **Do NOT** use `CSS3DRenderer`, R3F, or `html2canvas`. Render HTML *into* WebGL as a texture via `HTMLTexture`.
+5. **Do NOT** use R3F or `html2canvas`. Render HTML *into* WebGL as a texture via `HTMLTexture`. (`CSS3DRenderer` was tried for overlay hit-testing and also failed — see Learning #10.)
+5b. **Do NOT** attempt a "CSS proxy overlay" to get native pointer events on `layoutsubtree` canvases — hit regions don't follow CSS transforms in the current Canary build (Learning #10).
 6. **Do NOT** forget `layoutsubtree` on source canvases, or the subtree won't rasterize.
 
 ---
