@@ -40,6 +40,7 @@ export const SHAKE_MIN_TRAVEL  = 20;   // min px between reversals to count (fil
 export const SHAKE_WINDOW_MS   = 500;  // rolling time window for reversal timestamps
 export const SHAKE_COUNT       = 4;    // number of reversals to trigger parkAll
 export const MID_SCALE       = 0.5;  // scale for mid-zone parked windows (zones 1 and 4)
+export const MIN_SCALE       = 0.20; // minimum scale during live drag (edge floor)
 export const GRID_CELL_PX    = 86;   // baseline grid cell size: 3440/86 = exactly 40 columns across the desktop
 
 // ── Grid line look (Phase 2 aesthetics; all widths in screen px) ──

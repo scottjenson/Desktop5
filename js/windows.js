@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
-  PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE,
+  PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE, MIN_SCALE,
   WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
   SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
 } from './config.js';
@@ -20,7 +20,7 @@ function getWindowScale(xPos) {
   const flankDist = Math.max(0, Math.abs(xPos) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
   const innerDeriv = 1 / (1 - WARP_DEADZONE);
   const derivative = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH * innerDeriv;
-  return 1 / (1 + derivative);
+  return Math.max(MIN_SCALE, 1 / (1 + derivative));
 }
 
 // Two edge snap zones: left and right.
@@ -156,7 +156,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
     const localY = (1 - hits[0].uv.y) * info.h;
     const isShift = e.shiftKey;
-    const isIconSized = mesh.scale.x <= (SHRUNK_PX / info.w) * 1.1;
+    const isIconSized = mesh.scale.x <= Math.max(SHRUNK_PX / info.w, MIN_SCALE) * 1.1;
 
     // Normal drag: titlebar only. Shift-drag or icon-sized: anywhere on the window.
     if (localY <= TITLEBAR_H || isShift || isIconSized) {
