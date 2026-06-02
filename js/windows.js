@@ -5,6 +5,7 @@ import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
   PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE,
   WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
+  SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -22,44 +23,31 @@ function getWindowScale(xPos) {
   return 1 / (1 + derivative);
 }
 
-// Zone highlight rectangles — 6 zones from left to right.
-const _pL = DESKTOP_W * (1 - PLATEAU_FRAC) / 2; // plateau left boundary
-const _pM = DESKTOP_W / 2;                        // plateau center
-const _pR = DESKTOP_W * (1 + PLATEAU_FRAC) / 2; // plateau right boundary
-const _iW = SHRUNK_PX + 90;                       // icon zone width (~200px)
-const _cW = DESKTOP_W * PLATEAU_FRAC / 2;         // center zone width
-const _mW = _pL - _iW;                            // mid zone width
+// Two edge snap zones: left and right.
+const _iW = SHRUNK_PX + 90; // icon zone width (~200px)
 
 const ZONE_RECTS = [
-  { left: 0,              width: _iW }, // zone 0 — icon-left
-  { left: _iW,            width: _mW }, // zone 1 — mid-left
-  { left: _pL,            width: _cW }, // zone 2 — left-center
-  { left: _pM,            width: _cW }, // zone 3 — right-center
-  { left: _pR,            width: _mW }, // zone 4 — mid-right
-  { left: DESKTOP_W - _iW, width: _iW }, // zone 5 — icon-right
+  { left: 0,                width: _iW }, // zone 0 — left edge
+  { left: DESKTOP_W - _iW, width: _iW }, // zone 1 — right edge
 ];
 
-function zoneIndexForCx(cursorCx) {
-  if (cursorCx < _iW) return 0;
-  if (cursorCx < _pL) return 1;
-  if (cursorCx < _pM) return 2;
-  if (cursorCx < _pR) return 3;
-  if (cursorCx < DESKTOP_W - _iW) return 4;
-  return 5;
-}
-
-// Returns the snap {cx, scale} for a given zone index.
+// Returns the snap {cx, scale} for a given zone index (0 = left edge, 1 = right edge).
 function snapForZone(index, info) {
   const iconScale = SHRUNK_PX / info.w;
   const snaps = [
-    { cx: SHRUNK_PX / 2,             scale: iconScale }, // icon-left
-    { cx: (_iW + _pL) / 2,             scale: MID_SCALE }, // mid-left
-    { cx: (_pL + _pM) / 2,             scale: 1         }, // left-center
-    { cx: (_pM + _pR) / 2,             scale: 1         }, // right-center
-    { cx: (_pR + DESKTOP_W - _iW) / 2, scale: MID_SCALE }, // mid-right
-    { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // icon-right
+    { cx: SHRUNK_PX / 2,             scale: iconScale }, // left edge
+    { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // right edge
   ];
   return snaps[index];
+}
+
+// Park-all uses mid zones (50% scale), not the icon-sized edge zones.
+const _pL = DESKTOP_W * (1 - PLATEAU_FRAC) / 2;
+const _pR = DESKTOP_W * (1 + PLATEAU_FRAC) / 2;
+function parkSnapForSide(isLeft) {
+  return isLeft
+    ? { cx: (_iW + _pL) / 2,             scale: MID_SCALE }
+    : { cx: (_pR + DESKTOP_W - _iW) / 2, scale: MID_SCALE };
 }
 
 // ── Main ──────────────────────────────────────────────────
@@ -142,7 +130,6 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
   // ── Input ───────────────────────────────────────────────
   gl.addEventListener('mousedown', (e) => {
-    if (parkTimer) { clearTimeout(parkTimer); parkTimer = null; }
     toNdc(e);
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(meshes, false);
@@ -151,8 +138,6 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     const mesh = hits[0].object;
     const info = infoOf.get(mesh);
 
-    // Interacting during park state ends the session — leave all windows where they are.
-    if (parkedWindows.length) parkedWindows = [];
 
     const idx = stack.indexOf(info);
     if (idx !== -1) { stack.splice(idx, 1); stack.push(info); restack(); }
@@ -190,11 +175,12 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
         grabOffsetX: cx - cursorCx,
         topOffsetY:  windowTopY - cursorCy,
         hasMoved: false,
-        // Zone starts null — first SNAP_ZONE_STEP px of movement determines the
-        // initial zone from cursor position, then ratchets ±1 from there.
-        activeZone:   null,
-        lastCursorCx: cursorCx,
-        accumX: 0,
+        activeZone:    null,
+        startCursorCx: cursorCx,
+        shakeDir:      0,
+        shakeLastCx:   cursorCx,
+        shakeTimes:    [],
+        shook:         false,
       };
     }
     e.preventDefault();
@@ -231,30 +217,38 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     windowTopY = Math.max(windowTopY, MENUBAR_H);
     let cy = Math.min(windowTopY + halfH, DESKTOP_H - DOCK_CLEARANCE - halfH);
 
-    // Shift: ratcheted zone selection.
-    // First SNAP_ZONE_STEP px sets the initial zone from cursor position;
-    // each subsequent SNAP_ZONE_STEP px steps the zone ±1.
-    if (drag.shift) {
-      drag.accumX += cursorCx - drag.lastCursorCx;
-      drag.lastCursorCx = cursorCx;
+    // Shift: highlight left or right edge zone based on drag direction (suppressed after shake).
+    if (drag.shift && !drag.shook) {
+      const dx = cursorCx - drag.startCursorCx;
+      let newZone = null;
+      if (dx < -SNAP_ZONE_STEP) newZone = 0;      // left edge
+      else if (dx > SNAP_ZONE_STEP) newZone = 1;  // right edge
 
-      if (drag.activeZone === null) {
-        // Waiting for first threshold crossing to establish a starting zone.
-        if (Math.abs(drag.accumX) >= SNAP_ZONE_STEP) {
-          const dir = drag.accumX > 0 ? 1 : -1;
-          drag.activeZone = Math.min(5, Math.max(0, zoneIndexForCx(cursorCx) + dir));
-          drag.accumX = 0;
-          showZone(drag.activeZone);
-        }
-      } else if (drag.accumX <= -SNAP_ZONE_STEP) {
-        drag.activeZone = Math.max(0, drag.activeZone - 1);
-        drag.accumX += SNAP_ZONE_STEP;
-        showZone(drag.activeZone);
-      } else if (drag.accumX >= SNAP_ZONE_STEP) {
-        drag.activeZone = Math.min(5, drag.activeZone + 1);
-        drag.accumX -= SNAP_ZONE_STEP;
-        showZone(drag.activeZone);
+      if (newZone !== drag.activeZone) {
+        drag.activeZone = newZone;
+        if (newZone !== null) showZone(newZone);
+        else hideZone();
       }
+    }
+
+    // Shake detection: count direction reversals with min travel filter.
+    const shakeDx = cursorCx - drag.shakeLastCx;
+    if (Math.abs(shakeDx) >= SHAKE_MIN_TRAVEL) {
+      const dir = shakeDx > 0 ? 1 : -1;
+      if (drag.shakeDir !== 0 && dir !== drag.shakeDir) {
+        const now = performance.now();
+        drag.shakeTimes.push(now);
+        drag.shakeTimes = drag.shakeTimes.filter(t => now - t < SHAKE_WINDOW_MS);
+        if (drag.shakeTimes.length >= SHAKE_COUNT) {
+          parkAll(drag.mesh);
+          drag.activeZone = null;
+          drag.shook = true;
+          hideZone();
+          drag.shakeTimes = [];
+        }
+      }
+      drag.shakeDir  = dir;
+      drag.shakeLastCx = cursorCx;
     }
 
     drag.mesh.scale.set(scale, scale, 1);
@@ -294,28 +288,23 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     if (anims.length > 0) requestAnimationFrame(tickAnims);
   }
 
-  // ── Shift-hold park-all ───────────────────────────────────
-  let parkTimer = null;
-  let parkedWindows = []; // [{mesh, origX, origY, origScale}]
-
-  function parkAll() {
-    parkedWindows = [];
+  // ── Park-all (shake gesture) ──────────────────────────────
+  // Parks all full-size windows to mid zones, except the one being dragged.
+  function parkAll(excludeMesh) {
     const leftGroup = [];
     const rightGroup = [];
 
     for (const w of stack) {
+      if (w.mesh === excludeMesh) continue;
       if (w.mesh.scale.x < 0.95) continue;
       const curCx = worldToCenter(w.mesh.position.x, 0).cx;
       const curCy = DESKTOP_H / 2 - w.mesh.position.y / S;
-      parkedWindows.push({ mesh: w.mesh, origX: w.mesh.position.x, origY: w.mesh.position.y, origScale: w.mesh.scale.x });
-      const zone = curCx < DESKTOP_W / 2 ? 1 : 4;
-      const snap = snapForZone(zone, w);
+      const snap = parkSnapForSide(curCx < DESKTOP_W / 2);
       const halfH = (w.h * snap.scale) / 2;
       const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
-      (zone === 1 ? leftGroup : rightGroup).push({ w, snap, cy });
+      (curCx < DESKTOP_W / 2 ? leftGroup : rightGroup).push({ w, snap, cy });
     }
 
-    // Nudge overlapping windows downward within each side.
     for (const group of [leftGroup, rightGroup]) {
       group.sort((a, b) => a.cy - b.cy);
       for (let i = 1; i < group.length; i++) {
@@ -332,13 +321,6 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       const p = centerToWorld(snap.cx, cy);
       animateTo(w.mesh, p.x, p.y, snap.scale);
     }
-  }
-
-  function restoreAll() {
-    for (const pw of parkedWindows) {
-      animateTo(pw.mesh, pw.origX, pw.origY, pw.origScale);
-    }
-    parkedWindows = [];
   }
 
   // "1" key: toggle menubar centering + pill shape, driving repaints for CSS transitions.
@@ -379,17 +361,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   });
 
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Shift' && !e.repeat && !drag) {
-      parkTimer = setTimeout(() => { parkTimer = null; parkAll(); }, 500);
-    }
-  });
-
-  // Shift released: cancel park timer or restore parked windows; cancel zone highlight.
+  // Shift released: cancel zone highlight.
   window.addEventListener('keyup', (e) => {
     if (e.key === 'Shift') {
-      if (parkTimer) { clearTimeout(parkTimer); parkTimer = null; }
-      if (parkedWindows.length) restoreAll();
       if (drag?.shift) { drag.shift = false; drag.activeZone = null; hideZone(); }
     }
   });
@@ -407,23 +381,6 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       // Shift-drag: snap to highlighted zone, preserving current Y.
       const { info, mesh } = drag;
       const snap = snapForZone(drag.activeZone, info);
-      const halfH = (info.h * snap.scale) / 2;
-      const curCy = DESKTOP_H / 2 - mesh.position.y / S;
-      const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
-      mesh.scale.set(snap.scale, snap.scale, 1);
-      const p = centerToWorld(snap.cx, cy);
-      mesh.position.x = p.x;
-      mesh.position.y = p.y;
-    } else if (drag?.shift && drag.activeZone === null && !drag.hasMoved) {
-      // Shift-click (no drag): toggle between full-size center and parked mid zone.
-      const { info, mesh } = drag;
-      const curScale = mesh.scale.x;
-      const curCx = worldToCenter(mesh.position.x, 0).cx;
-      const isLeftHalf = curCx < DESKTOP_W / 2;
-      const targetZone = curScale >= 0.95
-        ? (isLeftHalf ? 1 : 4)   // full-size → park at 50% mid zone
-        : (isLeftHalf ? 2 : 3);  // scaled → restore to full-size center zone
-      const snap = snapForZone(targetZone, info);
       const halfH = (info.h * snap.scale) / 2;
       const curCy = DESKTOP_H / 2 - mesh.position.y / S;
       const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);

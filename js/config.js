@@ -35,7 +35,10 @@ export const SHRUNK_PX       = 110;  // ~icon target width (px) for a window at 
 export const WARP_DEADZONE   = 0.5;  // |x| (normalized -1..1): center 50% (1720px) stays orthogonal; 25% flanks warp
 export const WARP_POWER      = 3.0;  // cubic: w''(0)=0 → C²-smooth bend at the dead-zone boundary (no kink)
 export const WARP_STRENGTH   = 1.33; // compensates the cubic so edge localScale ≈ 1/9 (3·1.33·2·innerDeriv ≈ 8)
-export const SNAP_ZONE_STEP  = 100;  // px of horizontal movement to advance one snap zone
+export const SNAP_ZONE_STEP    = 100;  // px of horizontal movement to trigger edge zone highlight
+export const SHAKE_MIN_TRAVEL  = 20;   // min px between reversals to count (filters jitter)
+export const SHAKE_WINDOW_MS   = 500;  // rolling time window for reversal timestamps
+export const SHAKE_COUNT       = 4;    // number of reversals to trigger parkAll
 export const MID_SCALE       = 0.5;  // scale for mid-zone parked windows (zones 1 and 4)
 export const GRID_CELL_PX    = 86;   // baseline grid cell size: 3440/86 = exactly 40 columns across the desktop
 

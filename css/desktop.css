@@ -16,10 +16,11 @@
   top: var(--snap-top);
   height: var(--snap-height);
   border-radius: 16px;
-  background: rgba(100, 160, 255, 0.12);
-  border: 1.5px solid rgba(100, 160, 255, 0.28);
+  background: rgba(1, 15, 30, 0.35);
+  border: 2px solid rgba(100, 180, 255, 0.85);
+  box-shadow: 0 0 32px 8px rgba(24, 120, 224, 0.5), inset 0 0 20px rgba(100, 180, 255, 0.15);
   pointer-events: none;
-}
+} OK
 
 #menubar-chrome {
   position: relative;

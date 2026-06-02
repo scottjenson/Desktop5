@@ -160,7 +160,7 @@ const bgMesh = new THREE.Mesh(
       u_gridIntensity:{ value: GRID_INTENSITY },
       u_reveal:       { value: 0.0 },
       u_bgColor:      { value: new THREE.Color(0x0d1b3e) },
-      u_doorColor:    { value: new THREE.Color(0x1e5fa4) }, // macOS medium blue
+      u_doorColor:    { value: new THREE.Color(0xaaaadd) }, // macOS Monterey blue
       u_lineColor:    { value: new THREE.Color(0xe6eeff) }, // crisp cool-white core
       u_glowColor:    { value: new THREE.Color(0x0a84ff) }, // theme accent halo
     },
