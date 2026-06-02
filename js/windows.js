@@ -23,28 +23,26 @@ function getWindowScale(xPos) {
   return Math.max(MIN_SCALE, 1 / (1 + derivative));
 }
 
-// Two edge snap zones: left and right.
-const _iW = SHRUNK_PX + 90; // icon zone width (~200px)
+// Edge zones: icon-sized positions at the far left and right (shift-drag snap target).
+const _iW = SHRUNK_PX + 90; // edge zone width (~200px)
 
-const ZONE_RECTS = [
-  { left: 0,                width: _iW }, // zone 0 — left edge
-  { left: DESKTOP_W - _iW, width: _iW }, // zone 1 — right edge
+const EDGE_ZONES = [
+  { left: 0,                width: _iW }, // left edge
+  { left: DESKTOP_W - _iW, width: _iW }, // right edge
 ];
 
-// Returns the snap {cx, scale} for a given zone index (0 = left edge, 1 = right edge).
-function snapForZone(index, info) {
+// Snap position for the edge zones (icon-sized, shift-drag release).
+function snapToEdge(isLeft, info) {
   const iconScale = SHRUNK_PX / info.w;
-  const snaps = [
-    { cx: SHRUNK_PX / 2,             scale: iconScale }, // left edge
-    { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale }, // right edge
-  ];
-  return snaps[index];
+  return isLeft
+    ? { cx: SHRUNK_PX / 2,             scale: iconScale }
+    : { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale };
 }
 
-// Park-all uses mid zones (50% scale), not the icon-sized edge zones.
+// Stash zones: 50%-scale mid positions used by stashAll() and shift-click.
 const _pL = DESKTOP_W * (1 - PLATEAU_FRAC) / 2;
 const _pR = DESKTOP_W * (1 + PLATEAU_FRAC) / 2;
-function parkSnapForSide(isLeft) {
+function snapToStash(isLeft) {
   return isLeft
     ? { cx: (_iW + _pL) / 2,             scale: MID_SCALE }
     : { cx: (_pR + DESKTOP_W - _iW) / 2, scale: MID_SCALE };
@@ -52,7 +50,7 @@ function parkSnapForSide(isLeft) {
 
 // ── Main ──────────────────────────────────────────────────
 
-export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform }) {
+export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const dragPlane = new THREE.Plane();
@@ -83,8 +81,8 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   const overlay = document.getElementById('snap-zone-overlay');
 
   function showZone(index) {
-    overlay.style.left  = ZONE_RECTS[index].left + 'px';
-    overlay.style.width = ZONE_RECTS[index].width + 'px';
+    overlay.style.left  = EDGE_ZONES[index].left + 'px';
+    overlay.style.width = EDGE_ZONES[index].width + 'px';
     overlay.style.display = 'block';
     chromeSrc.requestPaint?.();
   }
@@ -240,7 +238,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
         drag.shakeTimes.push(now);
         drag.shakeTimes = drag.shakeTimes.filter(t => now - t < SHAKE_WINDOW_MS);
         if (drag.shakeTimes.length >= SHAKE_COUNT) {
-          parkAll(drag.mesh);
+          stashAll(drag.mesh);
           drag.activeZone = null;
           drag.shook = true;
           hideZone();
@@ -288,9 +286,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     if (anims.length > 0) requestAnimationFrame(tickAnims);
   }
 
-  // ── Park-all (shake gesture) ──────────────────────────────
-  // Parks all full-size windows to mid zones, except the one being dragged.
-  function parkAll(excludeMesh) {
+  // ── Stash-all (shake gesture) ─────────────────────────────
+  // Stashes all full-size windows to stash zones, except the one being dragged.
+  function stashAll(excludeMesh) {
     const leftGroup = [];
     const rightGroup = [];
 
@@ -299,7 +297,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       if (w.mesh.scale.x < 0.95) continue;
       const curCx = worldToCenter(w.mesh.position.x, 0).cx;
       const curCy = DESKTOP_H / 2 - w.mesh.position.y / S;
-      const snap = parkSnapForSide(curCx < DESKTOP_W / 2);
+      const snap = snapToStash(curCx < DESKTOP_W / 2);
       const halfH = (w.h * snap.scale) / 2;
       const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
       (curCx < DESKTOP_W / 2 ? leftGroup : rightGroup).push({ w, snap, cy });
@@ -340,9 +338,24 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   });
 
-  // "2" key: reveal/hide the grid background with a vertical door-open animation.
+  // "2" key: reveal/hide the grid background with a horizontal door-open animation.
+  // On first open, chains into a boot morph: flat grid → spatial funnel.
   let gridOpen = false;
   let revealAnimId = null;
+  let warpBootDone = false;
+
+  function runWarpBoot() {
+    warpBootDone = true;
+    const duration = 2500;
+    const start = performance.now();
+    (function warpTick() {
+      const t = Math.min((performance.now() - start) / duration, 1);
+      const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; // cubic ease-in-out
+      warpUniform.value = eased * WARP_STRENGTH;
+      if (t < 1) requestAnimationFrame(warpTick);
+    })();
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.key === '2') {
       gridOpen = !gridOpen;
@@ -355,8 +368,12 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
         const t = Math.min((performance.now() - start) / duration, 1);
         const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
         revealUniform.value = from + (to - from) * eased;
-        if (t < 1) revealAnimId = requestAnimationFrame(tick);
-        else revealAnimId = null;
+        if (t < 1) {
+          revealAnimId = requestAnimationFrame(tick);
+        } else {
+          revealAnimId = null;
+          if (gridOpen && !warpBootDone) runWarpBoot();
+        }
       })();
     }
   });
@@ -378,9 +395,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
   window.addEventListener('mouseup', () => {
     if (drag?.shift && drag.activeZone !== null) {
-      // Shift-drag: snap to highlighted zone, preserving current Y.
+      // Shift-drag: snap to highlighted edge zone, preserving current Y.
       const { info, mesh } = drag;
-      const snap = snapForZone(drag.activeZone, info);
+      const snap = snapToEdge(drag.activeZone === 0, info);
       const halfH = (info.h * snap.scale) / 2;
       const curCy = DESKTOP_H / 2 - mesh.position.y / S;
       const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
@@ -388,6 +405,24 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       const p = centerToWorld(snap.cx, cy);
       mesh.position.x = p.x;
       mesh.position.y = p.y;
+    } else if (drag?.shift && drag.activeZone === null && !drag.hasMoved) {
+      // Shift-click: toggle between full-size center and mid-zone park.
+      const { info, mesh } = drag;
+      const curScale = mesh.scale.x;
+      const curCx = worldToCenter(mesh.position.x, 0).cx;
+      const curCy = DESKTOP_H / 2 - mesh.position.y / S;
+      if (curScale >= 0.95) {
+        // Full-size → stash on current side.
+        const snap = snapToStash(curCx < DESKTOP_W / 2);
+        const halfH = (info.h * snap.scale) / 2;
+        const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+        animateTo(mesh, centerToWorld(snap.cx, cy).x, centerToWorld(snap.cx, cy).y, snap.scale);
+      } else {
+        // Parked → restore to full-size center.
+        const halfH = info.h / 2;
+        const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
+        animateTo(mesh, centerToWorld(DESKTOP_W / 2, cy).x, centerToWorld(DESKTOP_W / 2, cy).y, 1.0);
+      }
     }
     hideZone();
     drag = null;

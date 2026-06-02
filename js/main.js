@@ -152,7 +152,7 @@ const bgMesh = new THREE.Mesh(
       u_freqY:        { value: DESKTOP_H / GRID_CELL_PX },
       u_deadZone:     { value: WARP_DEADZONE },
       u_warpPower:    { value: WARP_POWER },
-      u_warpStrength: { value: WARP_STRENGTH },
+      u_warpStrength: { value: 0.0 },
       u_coreWidth:    { value: GRID_LINE_CORE_PX },
       u_glowWidth:    { value: GRID_LINE_GLOW_PX },
       u_glowStrength: { value: GRID_GLOW_STRENGTH },
@@ -266,7 +266,7 @@ await Promise.all(sources.map(async (canvas, i) => {
 }));
 
 // ── Interaction ───────────────────────────────────────────
-initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal });
+initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength });
 
 // ── Render loop ───────────────────────────────────────────
 (function animate() {
