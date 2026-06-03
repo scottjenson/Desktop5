@@ -25,6 +25,7 @@ renderer.setSize(DESKTOP_W, DESKTOP_H, false); // fixed buffer; CSS handled belo
 // dpr 1 and would quarter the buffer, under-resolving the dense grid flanks. We render
 // large (DESKTOP × RENDER_SUPERSAMPLE) and let CSS downscale → projector-proof crispness.
 renderer.setPixelRatio(RENDER_SUPERSAMPLE);
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
 const scene = new THREE.Scene();
 scene.background = null; // shader plane handles the background
