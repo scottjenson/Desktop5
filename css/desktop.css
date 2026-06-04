@@ -43,7 +43,7 @@
 }
 #menubar.centered {
   clip-path: inset(0 860px 0 860px round 19px);
-  background: rgba(0, 0, 0, 0.92);
+  background: rgba(55, 55, 55, 1.0);
   color: #fff;
   border-bottom-color: transparent;
 }

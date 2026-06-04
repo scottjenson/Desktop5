@@ -378,6 +378,17 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   });
 
+  // "3" key: toggle visibility of all windows. Used to clear the desktop before
+  // switching to Demo 3 (whose word-processor window is too different to morph to),
+  // so the tab switch reveals a "new window" on an otherwise-matching empty desktop.
+  let windowsHidden = false;
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '3') {
+      windowsHidden = !windowsHidden;
+      meshes.forEach((m) => { m.visible = !windowsHidden; });
+    }
+  });
+
   // Shift released: cancel zone highlight.
   window.addEventListener('keyup', (e) => {
     if (e.key === 'Shift') {
