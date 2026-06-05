@@ -262,7 +262,19 @@ await Promise.all(sources.map(async (canvas, i) => {
     }
   }
 
-  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl, playHitRect, playBtnEl, barEls });
+  // Finder window: cache each file's hit rect + element ref so clicks can move the
+  // .selected highlight. Same reason as above — layoutsubtree hides the DOM after
+  // first paint, so the element refs and geometry must be captured here at init.
+  let fileHits = null;
+  if (id === 'finder') {
+    const cr = canvas.getBoundingClientRect();
+    fileHits = [...canvas.querySelectorAll('.finder-file')].map((fileEl) => {
+      const hr = fileEl.getBoundingClientRect();
+      return { el: fileEl, x: hr.left - cr.left, y: hr.top - cr.top, w: hr.width, h: hr.height };
+    });
+  }
+
+  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl, playHitRect, playBtnEl, barEls, fileHits });
   scene.add(mesh);
 }));
 

@@ -152,6 +152,21 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       }
     }
 
+    // Finder file selection: clicking a file moves the .selected highlight to it.
+    // Falls through to normal window behaviour when the click misses every file.
+    if (info.fileHits && !e.shiftKey) {
+      const hitX = hits[0].uv.x * info.w;
+      const hitY = (1 - hits[0].uv.y) * info.h;
+      const f = info.fileHits.find(r => hitX >= r.x && hitX <= r.x + r.w && hitY >= r.y && hitY <= r.y + r.h);
+      if (f) {
+        info.fileHits.forEach(r => r.el.classList.remove('selected'));
+        f.el.classList.add('selected');
+        info.canvas.requestPaint?.();
+        e.preventDefault();
+        return;
+      }
+    }
+
     const localY = (1 - hits[0].uv.y) * info.h;
     const isShift = e.shiftKey;
     const isIconSized = mesh.scale.x <= Math.max(SHRUNK_PX / info.w, MIN_SCALE) * 1.1;
@@ -386,6 +401,21 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     if (e.key === '3') {
       windowsHidden = !windowsHidden;
       meshes.forEach((m) => { m.visible = !windowsHidden; });
+    }
+  });
+
+  // Text-selection guards. The source DOM is real off-screen text: Cmd+A would
+  // select-all across every window's subtree (untrappable, since it's off-screen),
+  // and any stray selection bleeds a blue highlight into the textures. Suppress
+  // Cmd/Ctrl+A entirely, and let Escape collapse any selection that did occur
+  // (e.g. a drag inside the word processor's selectable body).
+  window.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Escape') {
+      window.getSelection()?.removeAllRanges();
     }
   });
 

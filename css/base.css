@@ -28,5 +28,16 @@ html, body {
   position: fixed;
   left: -99999px; top: 0;
   pointer-events: none;
+  /* Source DOM is real, off-screen text. Disable selection everywhere so drags
+     and Cmd+A can't paint a stuck blue highlight that bleeds into the textures. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 #sources .src { display: block; }
+
+/* Word processor is the one window where selection is meaningful (shows "active").
+   Re-enable text selection only inside its page body. */
+#sources #win-wordprocessor .wp-page {
+  user-select: text;
+  -webkit-user-select: text;
+}
