@@ -7,6 +7,11 @@ The product is a web prototype that renders standard HTML/CSS application window
 
 **Important product correction:** windows are **flat** — they translate and recede in depth, but they do **not** rotate or tilt. Ignore any earlier "VisionOS tilt / `rotation.x/y`" framing.
 
+**Planning & design docs live in `plans/`.** Read the relevant one before working on that subsystem:
+* `plans/grid.md` — the desktop background "UX tension grid" shader (anamorphic warp, glow lines) and the **Drag Rails** feature (Phase 3, built). Read before touching the background shader or window-drag feedback.
+* `plans/vertex-warp-experiment.md` — a PAUSED experiment (windows physically deforming to follow the grid). Read before any "warp the window mesh" idea — it explains why that was abandoned (unreadable content).
+* `plans/CODE_REVIEW.md` — a dated, point-in-time review of the prototype.
+
 ---
 ## 🛠 Technology Stack & Constraints
 
