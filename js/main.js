@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_INTENSITY } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── CSS custom properties (derived from config.js) ────────
@@ -81,6 +81,11 @@ const _fragSrc = /* glsl */`
   uniform vec3  u_doorColor;    // plain backdrop shown before reveal
   uniform vec3  u_lineColor;    // crisp core colour (near-white)
   uniform vec3  u_glowColor;    // tinted halo colour (theme accent)
+  // Drag Rails (Phase 3): inert until a drag fires (u_dragActive defaults 0 → 0×anything=0).
+  uniform float u_dragActive;       // 0 = no drag, 1 = dragging (fade in/out driver)
+  uniform vec2  u_dragBand;         // dragged window's vertical extent in gridYcoord (logical-Y) space: (top, bottom)
+  uniform float u_highlightGain;    // extra brightness on highlighted horizontals
+  uniform float u_highlightThickness; // core/glow width multiplier for highlighted horizontals
   varying vec2 vUv;
 
   void main() {
@@ -112,6 +117,18 @@ const _fragSrc = /* glsl */`
     vec2 gridDist = abs(fract(gridUv - 0.5) - 0.5) / fwidth(gridUv);
     float line = min(gridDist.x, gridDist.y);
 
+    // Drag Rails (Phase 3) — split out the HORIZONTAL-line distance so it can be boosted
+    // independently. gridDist.y is distance to horizontal lines (gridUv.y → fract → lines).
+    // The band test is in gridYcoord (logical-Y) space so the highlighted-line COUNT is
+    // invariant across the warp (see plans/grid.md Phase 3). Inert in Stage 1: u_dragActive = 0.
+    float hLine = gridDist.y;
+    // Mask = 1 inside [bandLo, bandHi]; order-agnostic so JS can pass top/bottom either way.
+    float bandLo = min(u_dragBand.x, u_dragBand.y);
+    float bandHi = max(u_dragBand.x, u_dragBand.y);
+    float bandMask = smoothstep(bandLo - 0.001, bandLo + 0.001, gridYcoord)
+                   * smoothstep(bandHi + 0.001, bandHi - 0.001, gridYcoord);
+    float bandBoost = bandMask * u_dragActive; // == 0 until a drag fires
+
     // Each line = a crisp near-white CORE + a soft tinted GLOW halo, both sized in px so
     // they stay consistent at any compression. The glow downscales gracefully on a
     // projector where a 1px core would flicker, and in the dense flanks the always-near
@@ -135,6 +152,19 @@ const _fragSrc = /* glsl */`
     vec3 col = u_bgColor;
     col += u_glowColor * glow * u_gridIntensity;
     col = mix(col, u_lineColor, core * u_gridIntensity);
+
+    // ── Drag Rails (Phase 3) ──────────────────────────────────────────────
+    // Highlight the HORIZONTAL lines inside the dragged window's vertical band:
+    // a thicker, brighter core+glow layered ON TOP of the base grid. hLine and
+    // bandBoost computed above; bandBoost == 0 unless a drag is active.
+    // NOTE: intentionally NOT multiplied by edgeFade — the rails must stay lit in
+    // the flank where edgeFade would vignette the base grid away (see plans/grid.md Phase 3).
+    float hCore = 1.0 - smoothstep(0.0, u_coreWidth * u_highlightThickness, hLine);
+    float hGlow = exp(-hLine / (u_glowWidth * u_highlightThickness)) * u_glowStrength;
+    hCore *= 1.0 - smoothstep(0.35, 0.7, density); // share the base Moiré safety net
+    float rail = bandBoost * u_highlightGain * u_gridIntensity;
+    col += u_glowColor * hGlow * rail;
+    col = mix(col, u_lineColor, clamp(hCore * rail, 0.0, 1.0));
 
     // Door reveal: two doors split left/right from centre as u_reveal goes 0→1.
     // Hard step closes the seam completely — smoothstep bleeds grid through at center.
@@ -160,6 +190,10 @@ const bgMesh = new THREE.Mesh(
       u_edgeFadeStart:{ value: GRID_EDGE_FADE_START },
       u_gridIntensity:{ value: GRID_INTENSITY },
       u_reveal:       { value: 0.0 },
+      u_dragActive:   { value: 0.0 }, // Drag Rails (Phase 3) — 0 until a drag fires
+      u_dragBand:     { value: new THREE.Vector2(0.0, 0.0) }, // (top, bottom) in gridYcoord space
+      u_highlightGain:      { value: HIGHLIGHT_GAIN },
+      u_highlightThickness: { value: HIGHLIGHT_THICKNESS },
       u_bgColor:      { value: new THREE.Color(0x0d1b3e) },
       u_doorColor:    { value: new THREE.Color(0xaaaadd) }, // macOS Monterey blue
       u_lineColor:    { value: new THREE.Color(0xe6eeff) }, // crisp cool-white core
@@ -279,7 +313,7 @@ await Promise.all(sources.map(async (canvas, i) => {
 }));
 
 // ── Interaction ───────────────────────────────────────────
-initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength });
+initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand });
 
 // ── Render loop ───────────────────────────────────────────
 (function animate() {

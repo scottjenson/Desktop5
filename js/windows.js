@@ -6,6 +6,7 @@ import {
   PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE, MIN_SCALE,
   WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
   SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
+  HIGHLIGHT_FADE_IN_MS, HIGHLIGHT_FADE_OUT_MS,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -21,6 +22,16 @@ function getWindowScale(xPos) {
   const innerDeriv = 1 / (1 - WARP_DEADZONE);
   const derivative = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH * innerDeriv;
   return Math.max(MIN_SCALE, 1 / (1 + derivative));
+}
+
+// The GRID's local scale at a normalized x — same curve as getWindowScale but UNCLAMPED.
+// The shader's gridYcoord = centerY / localScale uses this exact (un-floored) value, so the
+// drag band must too, or it would drift from the lines once the window hits MIN_SCALE.
+function gridLocalScale(xPos) {
+  const flankDist = Math.max(0, Math.abs(xPos) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
+  const innerDeriv = 1 / (1 - WARP_DEADZONE);
+  const derivative = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH * innerDeriv;
+  return 1 / (1 + derivative);
 }
 
 // Edge zones: icon-sized positions at the far left and right (shift-drag snap target).
@@ -50,7 +61,7 @@ function snapToStash(isLeft) {
 
 // ── Main ──────────────────────────────────────────────────
 
-export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform }) {
+export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform, dragActiveUniform, dragBandUniform }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const dragPlane = new THREE.Plane();
@@ -76,6 +87,39 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   const worldToCenter = (x, y) => ({ cx: x / S + DESKTOP_W / 2, cy: DESKTOP_H / 2 - y / S });
   // Desktop-px center X → normalized -1..1 (matches the shader's centerX space).
   const cxToNorm = (cx) => (cx - DESKTOP_W / 2) / (DESKTOP_W / 2);
+
+  // ── Drag Rails (Phase 3) ──────────────────────────────────
+  // Write the dragged window's vertical extent into u_dragBand, in the shader's gridYcoord
+  // (logical-Y) space, so the count of highlighted horizontal lines is warp-invariant.
+  //   desktop-px y → centerY:  centerY = 1 - 2·(y/DESKTOP_H)   (top=+1, bottom=-1)
+  //   centerY → gridYcoord:    divide by the GRID's localScale at the window's x (unclamped)
+  function writeDragBand(cx, cy, scale, info) {
+    const ls = gridLocalScale(cxToNorm(cx));
+    const halfH = (info.h * scale) / 2;
+    const topPx = cy - halfH;
+    const botPx = cy + halfH;
+    const topCenterY = 1 - 2 * (topPx / DESKTOP_H);
+    const botCenterY = 1 - 2 * (botPx / DESKTOP_H);
+    // band.x = top (larger gridYcoord), band.y = bottom (smaller). Shader treats them as a pair.
+    dragBandUniform.value.set(topCenterY / ls, botCenterY / ls);
+  }
+
+  // u_dragActive fade — a dedicated rAF loop (the mesh animation engine lerps transforms,
+  // not uniforms). Fades 0→1 on grab, 1→0 on release.
+  let fadeRaf = 0;
+  function fadeDragActive(target, duration) {
+    const from = dragActiveUniform.value;
+    const start = performance.now();
+    if (fadeRaf) cancelAnimationFrame(fadeRaf);
+    const step = () => {
+      const t = Math.min((performance.now() - start) / duration, 1);
+      const e = 1 - Math.pow(1 - t, 3); // cubic ease-out, matches the mesh engine
+      dragActiveUniform.value = from + (target - from) * e;
+      if (t < 1) fadeRaf = requestAnimationFrame(step);
+      else fadeRaf = 0;
+    };
+    step();
+  }
 
   // ── Zone overlay ────────────────────────────────────────
   const overlay = document.getElementById('snap-zone-overlay');
@@ -195,6 +239,10 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
         shakeTimes:    [],
         shook:         false,
       };
+
+      // Drag Rails: light up the horizontal lines behind the grabbed window.
+      writeDragBand(cx, cy, grabScale, info);
+      fadeDragActive(1, HIGHLIGHT_FADE_IN_MS);
     }
     e.preventDefault();
   });
@@ -268,6 +316,10 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     const p = centerToWorld(cx, cy);
     drag.mesh.position.x = p.x;
     drag.mesh.position.y = p.y;
+
+    // Drag Rails: recompute the band every frame — horizontal drift into the flank
+    // changes localScale (and thus the gridYcoord band) even with no vertical motion.
+    writeDragBand(cx, cy, scale, info);
   });
 
   // ── Animation engine ─────────────────────────────────────
@@ -435,6 +487,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   }, { passive: false });
 
   window.addEventListener('mouseup', () => {
+    // Drag Rails: fade the highlight out whenever a drag ends.
+    if (drag) fadeDragActive(0, HIGHLIGHT_FADE_OUT_MS);
+
     if (drag?.shift && drag.activeZone !== null) {
       // Shift-drag: snap to highlighted edge zone, preserving current Y.
       const { info, mesh } = drag;

@@ -52,3 +52,9 @@ export const GRID_LINE_GLOW_PX = 6.0; // glow falloff radius around each line
 export const GRID_GLOW_STRENGTH = 0.5; // 0..1 brightness of the glow halo
 export const GRID_EDGE_FADE_START = 0.65; // |x| (normalized -1..1) where lines begin fading; 0 at the very edge
 export const GRID_INTENSITY    = 0.5;  // global multiplier on core + glow (1.0 = full, 0.5 = half)
+
+// Drag Rails (Phase 3): horizontal lines behind a dragged window brighten + thicken.
+export const HIGHLIGHT_GAIN      = 1.6; // extra brightness/opacity on highlighted horizontals (additive multiplier)
+export const HIGHLIGHT_THICKNESS = 2.2; // core/glow width multiplier for highlighted horizontals (thicker = more "rail")
+export const HIGHLIGHT_FADE_IN_MS  = 150; // u_dragActive 0→1 on mousedown
+export const HIGHLIGHT_FADE_OUT_MS = 250; // u_dragActive 1→0 on mouseup
