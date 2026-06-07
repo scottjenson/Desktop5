@@ -1,10 +1,21 @@
 # Vertex Warp Experiment: Windows Following the Grid
 
-## Status: Paused — UX Readability
+## Status: Resurrected as a DEMO toggle (not a usable drag mode)
 
-The experiment succeeded technically — windows physically deform to follow the background grid's spatial compression curves. The Newton-Raphson inverse mapping locks vertices to grid lines with sub-pixel accuracy. However, the content distortion (text, buttons, UI elements warping with the mesh) made windows too hard to read in practice. The effect is striking as an animation but breaks usability for stationary reading.
+The experiment succeeded technically — windows physically deform to follow the background grid's spatial compression curves. The Newton-Raphson inverse mapping locks vertices to grid lines with sub-pixel accuracy. However, the content distortion (text, buttons, UI elements warping with the mesh) made windows too hard to read in practice. The effect is striking as an animation but breaks usability for stationary reading. **That readability problem is exactly why it stays a demo, not the real drag model** — the toggle exists to *show an audience why we rejected morphing*.
 
-The code **currently has all of this wired up**. To revert to flat windows, reverse the changes listed in the "How to Revert" section. To restore it, apply the changes listed in "How to Reconstruct."
+### What's wired up NOW (re-implemented; supersedes the old "How to Revert/Reconstruct" below)
+Re-added cleanly, gated so it's free when off:
+* **All window meshes are subdivided** `PlaneGeometry(w,h, MORPH_SEGMENTS_X, 1)` (`MORPH_SEGMENTS_X = 40`, config.js). At `u_warpBlend = 0` this renders pixel-identical to a flat quad.
+* **`morphMaterial(el)`** (js/main.js) — a `MeshBasicMaterial` with an `onBeforeCompile` vertex warp: Newton-Raphson inverse (4 iters) places each vertex's X on the grid's warped column, **plus the full Y-pull** (`squashedWorld.y *= localScale` toward world Y=0) which produces the trapezoid (left edge shorter than right in the left flank) AND drifts the window toward the screen equator. Gated by `u_warpBlend` (0 = flat). Per-window uniform, so flat and morphed windows coexist freely (each mesh owns its material).
+* **`setWarpBlend(mesh, value)`** (js/main.js) — tolerant of lazy `onBeforeCompile` (stores `pendingWarpBlend`, read as the initial uniform value on compile).
+* **Trigger:** the **"0" key** toggles morph on the frontmost window. No animation (snaps).
+
+### Two ACCEPTED roughnesses (intentionally NOT fixed — do not "fix" thinking they're bugs)
+1. **Vertical jump on toggle.** The Y-pull is toward world Y=0, so toggling a window vertically shifts it toward the screen midline. Accepted for a static toggle.
+2. **Morphed dragging "runs away" from the cursor** and stops short in the flank. The morph is computed in the vertex shader from `mesh.position` every frame, so it *tracks* a drag automatically and morphs live (a nice unplanned win for demoing) — BUT the flat drag logic doesn't know the window is displaced by the warp, so the grabbed point drifts off the cursor, worsening toward the edge. **This is the exact logical-vs-physical coordinate gap that the `screenToLogicalCoords` machinery below was built to solve.** Deliberately left unfixed: this mode is for *demonstrating legibility*, not usable dragging. If it ever needs to be usable, the fix is the coordinate mapping documented below.
+
+The "How to Revert / Reconstruct" and bug-history sections below are kept as the original record and the recipe for the *usable* (cursor-accurate) version — they predate this demo resurrection and the codebase has since moved (e.g. Drag Rails). Treat them as reference, not current state.
 
 ---
 

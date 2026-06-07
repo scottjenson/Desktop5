@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── CSS custom properties (derived from config.js) ────────
@@ -212,6 +212,89 @@ function htmlTexture(el) {
   return t;
 }
 
+// ── Window Morph (demo) ───────────────────────────────────────────────────
+// A MeshBasicMaterial whose vertex shader bends each window's vertices onto the
+// background grid's warped columns, so a morphed window's content hugs the same
+// compression curve as the grid lines behind it. Includes the Y-pull (trapezoid:
+// the deeper-in-flank edge foreshortens more), which also drifts the window toward
+// the screen equator on toggle (accepted — see plans/vertex-warp-experiment.md).
+// Gated by u_warpBlend (0 = flat, pixel-identical to a plain quad).
+//
+// Math: the grid warps logical→physical via f(xs) = xs + sign(xs)·flankDist^p·strength.
+// A vertex sits at logical world-X xw; we need the physical screen-X xs where f(xs)=xw.
+// Newton-Raphson (4 iters, smooth monotonic f → sub-pixel) inverts it. The compiled
+// shader is stashed on mat.userData.shader so setWarpBlend() can drive u_warpBlend.
+function morphMaterial(el) {
+  const mat = new THREE.MeshBasicMaterial({ map: htmlTexture(el), transparent: true, alphaTest: 0.5 });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.u_halfPlaneW   = { value: planeW / 2 };
+    shader.uniforms.u_warpDeadzone = { value: WARP_DEADZONE };
+    shader.uniforms.u_warpPower    = { value: WARP_POWER };
+    shader.uniforms.u_warpStrength = { value: WARP_STRENGTH };
+    shader.uniforms.u_warpBlend    = { value: mat.userData.pendingWarpBlend ?? 0.0 };
+
+    shader.vertexShader = `
+      uniform float u_halfPlaneW;
+      uniform float u_warpDeadzone;
+      uniform float u_warpPower;
+      uniform float u_warpStrength;
+      uniform float u_warpBlend;
+    ` + shader.vertexShader;
+
+    // Replace the standard projection with our warped one. <project_vertex> normally does:
+    //   vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0); gl_Position = projectionMatrix * mvPosition;
+    // We split modelView into model (to get world X for the warp) then view.
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      /* glsl */`
+        vec4 squashedWorld = modelMatrix * vec4(transformed, 1.0);
+        float xw = squashedWorld.x / u_halfPlaneW;        // logical pos, -1..1
+
+        float xs = xw;                                     // Newton initial guess
+        for (int i = 0; i < 4; i++) {
+          float flankDist  = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+          float warp       = sign(xs) * pow(flankDist, u_warpPower) * u_warpStrength;
+          float innerDeriv = 1.0 / (1.0 - u_warpDeadzone);
+          float deriv      = u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0))
+                             * u_warpStrength * innerDeriv;
+          float error  = (xs + warp) - xw;
+          float fPrime = 1.0 + deriv;
+          xs = xs - error / fPrime;
+        }
+
+        // Blend flat (xw) ↔ warped (xs).
+        float finalNorm = mix(xw, xs, u_warpBlend);
+        squashedWorld.x = finalNorm * u_halfPlaneW;
+
+        // Y pull (full original): scale each vertex's Y by the GRID's localScale at its
+        // solved physical position xs, toward world Y=0. Because xs differs across the
+        // window's width (left edge deeper in the flank → smaller localScale), the left
+        // edge foreshortens more than the right → the trapezoid. Also drifts the window
+        // toward the screen equator (accepted for the static toggle).
+        float finalFlank = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+        float finalDeriv = u_warpPower * pow(finalFlank, max(0.0, u_warpPower - 1.0))
+                           * u_warpStrength * (1.0 / (1.0 - u_warpDeadzone));
+        float localScale = 1.0 / (1.0 + finalDeriv);
+        float yScale = mix(1.0, localScale, u_warpBlend);
+        squashedWorld.y *= yScale;
+
+        vec4 mvPosition = viewMatrix * squashedWorld;
+        gl_Position = projectionMatrix * mvPosition;
+      `
+    );
+    mat.userData.shader = shader; // expose for u_warpBlend toggling
+  };
+  return mat;
+}
+
+// Set a window mesh's morph amount (0 = flat, 1 = fully warped). Tolerates the
+// material not having compiled yet (onBeforeCompile runs lazily on first render).
+function setWarpBlend(mesh, value) {
+  const mat = mesh.material;
+  mat.userData.pendingWarpBlend = value;
+  if (mat.userData.shader) mat.userData.shader.uniforms.u_warpBlend.value = value;
+}
+
 // ── Menubar — own canvas/mesh so animation repaints only its small bitmap ──
 const menubarSrc = document.getElementById('src-menubar');
 menubarSrc.style.width = DESKTOP_W + 'px';
@@ -261,11 +344,14 @@ await Promise.all(sources.map(async (canvas, i) => {
   el.style.width = w + 'px';
   el.style.height = h + 'px';
 
+  // Subdivided 40×1 so vertices can bend along the grid warp (Window Morph demo).
+  // At u_warpBlend = 0 (default) this renders pixel-identical to a flat quad.
   const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(w * S, h * S),
+    new THREE.PlaneGeometry(w * S, h * S, MORPH_SEGMENTS_X, 1),
     // alphaTest discards the transparent rounded corners so they don't write
     // depth and punch holes through windows stacked behind them.
-    new THREE.MeshBasicMaterial({ map: htmlTexture(el), transparent: true, alphaTest: 0.5 })
+    // morphMaterial adds the gated vertex warp (u_warpBlend = 0 → flat).
+    morphMaterial(el)
   );
 
   const x = Number(canvas.dataset.x);
@@ -314,6 +400,20 @@ await Promise.all(sources.map(async (canvas, i) => {
 
 // ── Interaction ───────────────────────────────────────────
 initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand });
+
+// Window Morph (demo): "0" toggles morph on the FRONTMOST window (highest z = last
+// clicked/dragged). Toggle in the center for a static morph, or drag toward a flank to
+// see the window deform along the grid columns (content becomes hard to read — that's
+// the point being demonstrated). NB: a morphed window does NOT track the cursor while
+// dragging (it "runs away" in the flank) — this is the known logical-vs-physical
+// coordinate gap from the paused vertex-warp experiment, intentionally left unfixed;
+// this mode is for demonstrating legibility, not for usable dragging. See plans/.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== '0' || !windowMeshes.length) return;
+  const front = windowMeshes.reduce((a, b) => (b.mesh.position.z > a.mesh.position.z ? b : a));
+  const cur = front.mesh.material.userData.pendingWarpBlend ?? 0;
+  setWarpBlend(front.mesh, cur > 0 ? 0 : 1);
+});
 
 // ── Render loop ───────────────────────────────────────────
 (function animate() {

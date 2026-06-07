@@ -58,3 +58,8 @@ export const HIGHLIGHT_GAIN      = 1.6; // extra brightness/opacity on highlight
 export const HIGHLIGHT_THICKNESS = 2.2; // core/glow width multiplier for highlighted horizontals (thicker = more "rail")
 export const HIGHLIGHT_FADE_IN_MS  = 150; // u_dragActive 0→1 on mousedown
 export const HIGHLIGHT_FADE_OUT_MS = 250; // u_dragActive 1→0 on mouseup
+
+// Window Morph (demo): subdivide window meshes so vertices can bend along the grid warp.
+// At u_warpBlend = 0 a subdivided plane renders pixel-identical to a flat quad (~free).
+export const MORPH_SEGMENTS_X = 40; // horizontal segments — enough to bend smoothly across the warp boundary
+export const MORPH_FADE_MS    = 220; // u_warpBlend 0↔1 animation on toggle
