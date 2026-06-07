@@ -394,12 +394,15 @@ await Promise.all(sources.map(async (canvas, i) => {
     });
   }
 
-  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl, playHitRect, playBtnEl, barEls, fileHits });
+  // Remember the original placement so the "4" key can reset the demo (see keydown below).
+  const home = { x: mesh.position.x, y: mesh.position.y, z };
+
+  windowMeshes.push({ mesh, w, h, id, canvas, scrollEl, playHitRect, playBtnEl, barEls, fileHits, home });
   scene.add(mesh);
 }));
 
 // ── Interaction ───────────────────────────────────────────
-initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand });
+const windowsApi = initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand });
 
 // Window Morph (demo): "0" toggles morph on the FRONTMOST window (highest z = last
 // clicked/dragged). Toggle in the center for a static morph, or drag toward a flank to
@@ -413,6 +416,20 @@ window.addEventListener('keydown', (e) => {
   const front = windowMeshes.reduce((a, b) => (b.mesh.position.z > a.mesh.position.z ? b : a));
   const cur = front.mesh.material.userData.pendingWarpBlend ?? 0;
   setWarpBlend(front.mesh, cur > 0 ? 0 : 1);
+});
+
+// "4" resets every window to its original position/scale/morph/visibility so the demo
+// can be re-run without reloading. Touches windows ONLY — the menubar and grid lines
+// (their own meshes/uniforms) are left exactly as they are.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== '4') return;
+  for (const win of windowMeshes) {
+    win.mesh.position.set(win.home.x, win.home.y, win.home.z);
+    win.mesh.scale.set(1, 1, 1);
+    win.mesh.visible = true;
+    setWarpBlend(win.mesh, 0);
+  }
+  windowsApi.resetStack(); // restore stack order so the next click doesn't reshuffle z
 });
 
 // ── Render loop ───────────────────────────────────────────

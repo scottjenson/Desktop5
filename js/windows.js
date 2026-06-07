@@ -523,4 +523,18 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     hideZone();
     drag = null;
   });
+
+  // Restore the stack to its original (build) order and re-apply z by rank. Used by the
+  // "4" demo-reset key so the NEXT click doesn't restack windows to a reordered z.
+  // Also cancels any in-flight mesh animations + active drag so they don't clobber the
+  // home positions main.js just set.
+  function resetStack() {
+    anims.length = 0; // drop any running park/restore lerps
+    drag = null;      // abandon an in-progress drag
+    stack.length = 0;
+    stack.push(...windowMeshes);
+    restack();
+  }
+
+  return { resetStack };
 }
