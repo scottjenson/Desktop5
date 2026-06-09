@@ -7,6 +7,7 @@ import {
   WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
   SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
   HIGHLIGHT_FADE_IN_MS, HIGHLIGHT_FADE_OUT_MS,
+  MUSIC_COMPACT_SCALE, MUSIC_COMPACT_BTN_PX,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -170,6 +171,35 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   }
 
+  // ── Music compact mode ────────────────────────────────────
+  // When the music window shrinks past MUSIC_COMPACT_SCALE (≈ parking at the edge),
+  // swap to a stripped layout with one giant Play/Pause button. The DOM bitmap stays
+  // full-res and is GPU-scaled down, so the big button renders crisp at any on-screen
+  // size. The hit-test reads info.playHitRect in bitmap-px (uv·info.w), so we just swap
+  // that rect alongside the .compact CSS class. Hit rect mirrors the CSS button geometry.
+  let musicCompact = false;
+  const musicFullHitRect = musicInfo?.playHitRect ?? null;
+  const musicCompactHitRect = musicInfo ? {
+    x: (musicInfo.w - MUSIC_COMPACT_BTN_PX) / 2,
+    y: (musicInfo.h - MUSIC_COMPACT_BTN_PX) / 2,
+    w: MUSIC_COMPACT_BTN_PX,
+    h: MUSIC_COMPACT_BTN_PX,
+  } : null;
+
+  function setMusicCompact(on) {
+    if (!musicInfo?.rootEl || on === musicCompact) return;
+    musicCompact = on;
+    musicInfo.rootEl.classList.toggle('compact', on);
+    musicInfo.playHitRect = on ? musicCompactHitRect : musicFullHitRect;
+    musicInfo.canvas.requestPaint?.();
+  }
+
+  // Called from the scale-set sites (drag, anim, edge snap). Acts only on a crossing.
+  function updateMusicCompact() {
+    if (!musicInfo) return;
+    setMusicCompact(musicInfo.mesh.scale.x < MUSIC_COMPACT_SCALE);
+  }
+
   // ── Input ───────────────────────────────────────────────
   gl.addEventListener('mousedown', (e) => {
     toNdc(e);
@@ -317,6 +347,8 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     drag.mesh.position.x = p.x;
     drag.mesh.position.y = p.y;
 
+    if (drag.info === musicInfo) updateMusicCompact();
+
     // Drag Rails: recompute the band every frame — horizontal drift into the flank
     // changes localScale (and thus the gridYcoord band) even with no vertical motion.
     writeDragBand(cx, cy, scale, info);
@@ -348,6 +380,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       a.mesh.position.y = a.fromY + (a.toY - a.fromY) * e;
       const s = a.fromScale + (a.toScale - a.fromScale) * e;
       a.mesh.scale.set(s, s, 1);
+      if (a.mesh === musicInfo?.mesh) updateMusicCompact();
       if (t >= 1) anims.splice(i, 1);
     }
     if (anims.length > 0) requestAnimationFrame(tickAnims);
@@ -501,6 +534,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       const p = centerToWorld(snap.cx, cy);
       mesh.position.x = p.x;
       mesh.position.y = p.y;
+      if (info === musicInfo) updateMusicCompact();
     } else if (drag?.shift && drag.activeZone === null && !drag.hasMoved) {
       // Shift-click: toggle between full-size center and mid-zone park.
       const { info, mesh } = drag;
@@ -534,6 +568,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     stack.length = 0;
     stack.push(...windowMeshes);
     restack();
+    updateMusicCompact(); // main.js reset scale to 1 → drop compact mode if it was on
   }
 
   return { resetStack };

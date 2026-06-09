@@ -63,3 +63,10 @@ export const HIGHLIGHT_FADE_OUT_MS = 250; // u_dragActive 1→0 on mouseup
 // At u_warpBlend = 0 a subdivided plane renders pixel-identical to a flat quad (~free).
 export const MORPH_SEGMENTS_X = 40; // horizontal segments — enough to bend smoothly across the warp boundary
 export const MORPH_FADE_MS    = 220; // u_warpBlend 0↔1 animation on toggle
+
+// Music compact mode: when the music window shrinks past this scale (≈ parking at the
+// edge), swap to a stripped-down layout with one giant Play/Pause button. The button
+// size is shared by the JS hit-rect and the CSS (#win-music.compact .music-play-btn),
+// expressed in the music bitmap's own px (canvas is 680×480); keep the two in sync.
+export const MUSIC_COMPACT_SCALE   = 0.3; // mesh.scale.x threshold to enter compact mode
+export const MUSIC_COMPACT_BTN_PX  = 280; // giant play button size, centered in the 680×480 bitmap

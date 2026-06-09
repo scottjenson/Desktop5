@@ -501,3 +501,30 @@
 .music-track-title { font-weight: 500; color: inherit; }
 .music-track-album { font-size: 11px; }
 .music-track-dur { text-align: right; font-size: 11px; }
+
+/* ── Compact mode (responsive) ──────────────────────────────────────────────
+   Toggled by JS (.compact on #win-music) when the window shrinks past
+   MUSIC_COMPACT_SCALE — drop everything to one giant, easy-to-hit Play/Pause.
+   Button is 280px to match MUSIC_COMPACT_BTN_PX (config.js), centered in the
+   680×480 bitmap; the DOM is full-res and GPU-scaled down, so it stays crisp. */
+#win-music.compact .music-sidebar,
+#win-music.compact .music-header,
+#win-music.compact .music-ctrl-btn,
+#win-music.compact .music-progress,
+#win-music.compact .music-visualizer,
+#win-music.compact .music-tracklist { display: none; }
+
+#win-music.compact .win-body { display: block; }
+#win-music.compact .music-main { padding: 0; height: 100%; }
+#win-music.compact .music-controls-bar {
+  padding: 0;
+  height: 100%;
+  justify-content: center;
+}
+#win-music.compact .music-play-hit {
+  width: 280px; height: 280px;
+}
+#win-music.compact .music-play-btn {
+  width: 280px; height: 280px;
+  font-size: 130px;
+}
