@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_EDGE_FADE_FLOOR, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── CSS custom properties (derived from config.js) ────────
@@ -70,11 +70,13 @@ const _fragSrc = /* glsl */`
   uniform float u_freqY;        // grid cells across full height (DESKTOP_H / GRID_CELL_PX)
   uniform float u_deadZone;     // |x| (in -1..1) of the un-warped centre focus zone
   uniform float u_warpPower;    // 2.0 quadratic … 3.0 cubic
-  uniform float u_warpStrength; // total spatial compression per flank
+  uniform float u_warpStrength; // total spatial compression per flank (animates 0→max during boot)
+  uniform float u_warpStrengthMax; // the warp's full value; u_warpStrength/this = warp progress 0..1
   uniform float u_coreWidth;    // crisp line core half-width (screen px)
   uniform float u_glowWidth;    // soft glow falloff radius (screen px)
   uniform float u_glowStrength; // glow halo brightness (0..1)
-  uniform float u_edgeFadeStart;// |centerX| where the edge fade begins (→0 at the edge)
+  uniform float u_edgeFadeStart;// |centerX| where the edge fade begins easing toward the floor
+  uniform float u_edgeFadeFloor;// brightness the edge fade bottoms out at (>0 so grid stays visible)
   uniform float u_gridIntensity;// global scale on core + glow (0.5 = half brightness)
   uniform float u_reveal;       // 0 = doors closed (plain blue), 1 = fully open (grid)
   uniform vec3  u_bgColor;
@@ -141,9 +143,14 @@ const _fragSrc = /* glsl */`
     float density = length(fwidth(gridUv));
     core *= 1.0 - smoothstep(0.35, 0.7, density);
 
-    // Edge fade: ease the whole line intensity to 0 toward the left/right edges so the
-    // bright, compressed flanks vignette out instead of dominating. Full through centre.
-    float edgeFade = 1.0 - smoothstep(u_edgeFadeStart, 1.0, abs(centerX));
+    // Edge fade: ease line intensity DOWN TO u_edgeFadeFloor (not 0) toward the L/R edges,
+    // so the compressed flanks dim but the grid stays visible all the way to the bezel.
+    float fadeAmt = 1.0 - smoothstep(u_edgeFadeStart, 1.0, abs(centerX));
+    float flooredFade = mix(u_edgeFadeFloor, 1.0, fadeAmt);
+    // Tie the fade to the warp: at flat (warpProgress 0) the grid is uniform to the edges;
+    // the vignette eases in IN LOCKSTEP with the warp boot (and any live warp change).
+    float warpProgress = u_warpStrength / max(u_warpStrengthMax, 1e-5);
+    float edgeFade = mix(1.0, flooredFade, warpProgress);
     core *= edgeFade;
     glow *= edgeFade;
 
@@ -184,10 +191,12 @@ const bgMesh = new THREE.Mesh(
       u_deadZone:     { value: WARP_DEADZONE },
       u_warpPower:    { value: WARP_POWER },
       u_warpStrength: { value: 0.0 },
+      u_warpStrengthMax: { value: WARP_STRENGTH },
       u_coreWidth:    { value: GRID_LINE_CORE_PX },
       u_glowWidth:    { value: GRID_LINE_GLOW_PX },
       u_glowStrength: { value: GRID_GLOW_STRENGTH },
       u_edgeFadeStart:{ value: GRID_EDGE_FADE_START },
+      u_edgeFadeFloor:{ value: GRID_EDGE_FADE_FLOOR },
       u_gridIntensity:{ value: GRID_INTENSITY },
       u_reveal:       { value: 0.0 },
       u_dragActive:   { value: 0.0 }, // Drag Rails (Phase 3) — 0 until a drag fires

@@ -86,14 +86,6 @@
 }
 .dock-sep { width: 1px; height: 66px; background: rgba(255,255,255,0.3); align-self: center; margin: 0 6px; }
 
-#trash {
-  position: absolute;
-  bottom: 18px; right: 32px;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-}
-#trash svg { width: 44px; height: 50px; filter: drop-shadow(0 3px 8px rgba(0,0,0,0.5)); }
-#trash .label { font-size: 11px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
-
 /* ── SHARED WINDOW FRAME (each window fills its own source canvas) ── */
 .os-window {
   width: 100%; height: 100%;

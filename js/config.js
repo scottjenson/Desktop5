@@ -50,7 +50,8 @@ export const GRID_CELL_PX    = 86;   // baseline grid cell size: 3440/86 = exact
 export const GRID_LINE_CORE_PX = 1.5; // core half-width: crisp center of each line
 export const GRID_LINE_GLOW_PX = 6.0; // glow falloff radius around each line
 export const GRID_GLOW_STRENGTH = 0.5; // 0..1 brightness of the glow halo
-export const GRID_EDGE_FADE_START = 0.65; // |x| (normalized -1..1) where lines begin fading; 0 at the very edge
+export const GRID_EDGE_FADE_START = 0.65; // |x| (normalized -1..1) where lines begin fading toward the floor
+export const GRID_EDGE_FADE_FLOOR = 0.35; // brightness the edge fade bottoms out at (NOT 0 — grid stays visible to the edge)
 export const GRID_INTENSITY    = 0.5;  // global multiplier on core + glow (1.0 = full, 0.5 = half)
 
 // Drag Rails (Phase 3): horizontal lines behind a dragged window brighten + thicken.
