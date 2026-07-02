@@ -35,6 +35,43 @@ function gridLocalScale(xPos) {
   return 1 / (1 + derivative);
 }
 
+// Forward warp f(xs): PHYSICAL normalized x → LOGICAL normalized x. Closed form —
+// the same curve the grid shader draws and the morph vertex shader inverts with
+// Newton; the forward direction needs no iteration.
+function warpForward(xsNorm) {
+  const flankDist = Math.max(0, Math.abs(xsNorm) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
+  return xsNorm + Math.sign(xsNorm) * Math.pow(flankDist, WARP_POWER) * WARP_STRENGTH;
+}
+
+// Newton inverse of warpForward (mirrors the morph vertex shader): LOGICAL
+// normalized x → PHYSICAL normalized x. 4 iterations = sub-pixel on this smooth
+// monotonic curve.
+function warpInverse(xwNorm) {
+  let xs = xwNorm;
+  for (let i = 0; i < 4; i++) {
+    const flankDist = Math.max(0, Math.abs(xs) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
+    const deriv = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH / (1 - WARP_DEADZONE);
+    xs -= (warpForward(xs) - xwNorm) / (1 + deriv);
+  }
+  return xs;
+}
+
+// Physical cursor (desktop px) → LOGICAL desktop px, for dragging MORPHED windows.
+// The raycaster returns physical coords but a morphed mesh's position is logical —
+// the gap documented in plans/vertex-warp-experiment.md ("runs away" drag). Y per
+// shape mode: 0 (faithful) pulls Y toward the screen equator by localScale, so
+// divide it back out at the cursor's x; 1 (creased) pivots on the window's own
+// centerline, so the window CENTER needs no Y correction.
+function cursorToLogical(cxPhys, cyPhys, morphMode) {
+  const xsNorm = (cxPhys - DESKTOP_W / 2) / (DESKTOP_W / 2);
+  const cx = (warpForward(xsNorm) + 1) * (DESKTOP_W / 2);
+  let cy = cyPhys;
+  if (morphMode === 0) {
+    cy = DESKTOP_H / 2 - (DESKTOP_H / 2 - cyPhys) / gridLocalScale(xsNorm);
+  }
+  return { cx, cy };
+}
+
 // Edge zones: icon-sized positions at the far left and right (shift-drag snap target).
 const _iW = SHRUNK_PX + 90; // edge zone width (~200px)
 
@@ -94,16 +131,33 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   // Write the dragged window's vertical extent into u_dragBand, in the shader's gridYcoord
   // (logical-Y) space, so the count of highlighted horizontal lines is warp-invariant.
   //   desktop-px y → centerY:  centerY = 1 - 2·(y/DESKTOP_H)   (top=+1, bottom=-1)
-  //   centerY → gridYcoord:    divide by the GRID's localScale at the window's x (unclamped)
-  function writeDragBand(cx, cy, scale, info) {
-    const ls = gridLocalScale(cxToNorm(cx));
-    const halfH = (info.h * scale) / 2;
-    const topPx = cy - halfH;
-    const botPx = cy + halfH;
-    const topCenterY = 1 - 2 * (topPx / DESKTOP_H);
-    const botCenterY = 1 - 2 * (botPx / DESKTOP_H);
+  // The centerY → gridYcoord mapping depends on how the window converges:
+  //   flat: window sits at physical = logical x, UNCONVERGED vertically → it spans
+  //         more grid rows in the flank: divide the whole extent by ls(cx).
+  //   morphed mode 0 (faithful): converges exactly WITH the grid → always covers
+  //         the same logical rows: the band IS the logical extent, no division.
+  //         (Dividing by ls at the overscrolled LOGICAL cx was the giant-band bug.)
+  //   morphed mode 1 (creased): center y is unwarped (pivot = window centerline),
+  //         but the fold converges the height ≈ like the grid → scale only the
+  //         center term by 1/ls at the window's PHYSICAL center x.
+  function writeDragBand(cx, cy, scale, info, morphed, morphMode) {
+    const centerY = 1 - 2 * (cy / DESKTOP_H);
+    const hc = (info.h * scale) / DESKTOP_H; // half-height in centerY units
+    let top, bot;
+    if (!morphed) {
+      const ls = gridLocalScale(cxToNorm(cx));
+      top = (centerY + hc) / ls;
+      bot = (centerY - hc) / ls;
+    } else if (morphMode === 0) {
+      top = centerY + hc;
+      bot = centerY - hc;
+    } else {
+      const ls = gridLocalScale(warpInverse(cxToNorm(cx)));
+      top = centerY / ls + hc;
+      bot = centerY / ls - hc;
+    }
     // band.x = top (larger gridYcoord), band.y = bottom (smaller). Shader treats them as a pair.
-    dragBandUniform.value.set(topCenterY / ls, botCenterY / ls);
+    dragBandUniform.value.set(top, bot);
   }
 
   // u_dragActive fade — a dedicated rAF loop (the mesh animation engine lerps transforms,
@@ -253,14 +307,20 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       raycaster.ray.intersectPlane(dragPlane, hit);
 
       const { cx, cy } = worldToCenter(mesh.position.x, mesh.position.y);
-      const cursorCx = worldToCenter(hit.x, 0).cx;
-      const cursorCy = worldToCenter(0, hit.y).cy;
+      // Morphed windows track in LOGICAL space: forward-warp the physical cursor
+      // so grab offsets and the mousemove tracking share the window's own space.
+      const morphed = (mesh.material.userData.pendingWarpBlend ?? 0) > 0;
+      const morphMode = mesh.material.userData.pendingMorphMode ?? 0;
+      const physCx = worldToCenter(hit.x, 0).cx;
+      const physCy = worldToCenter(0, hit.y).cy;
+      const { cx: cursorCx, cy: cursorCy } = morphed ? cursorToLogical(physCx, physCy, morphMode) : { cx: physCx, cy: physCy };
       const grabScale = mesh.scale.x || 1;
       const windowTopY = cy - (info.h * grabScale) / 2;
 
       drag = {
         mesh, info,
         shift: isShift,
+        morphed, morphMode, grabScale,
         grabOffsetX: cx - cursorCx,
         topOffsetY:  windowTopY - cursorCy,
         hasMoved: false,
@@ -273,7 +333,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       };
 
       // Drag Rails: light up the horizontal lines behind the grabbed window.
-      writeDragBand(cx, cy, grabScale, info);
+      writeDragBand(cx, cy, grabScale, info, morphed, morphMode);
       fadeDragActive(1, HIGHLIGHT_FADE_IN_MS);
     }
     e.preventDefault();
@@ -287,22 +347,38 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
     drag.hasMoved = true;
     const { info } = drag;
-    const cursorCx = worldToCenter(hit.x, 0).cx;
-    const cursorCy = worldToCenter(0, hit.y).cy;
+    const physCx = worldToCenter(hit.x, 0).cx;
+    const physCy = worldToCenter(0, hit.y).cy;
+    const { cx: cursorCx, cy: cursorCy } = drag.morphed ? cursorToLogical(physCx, physCy, drag.morphMode) : { cx: physCx, cy: physCy };
 
-    // X: free drag with self-consistent clamp.
-    // scale depends on cx, so halfW depends on cx — a single-pass clamp undershoots
-    // (the clamped position is less compressed → larger halfW → edge overshoots 0).
-    // Iterate to convergence: typically done in 3–4 steps.
     let cx = cursorCx + drag.grabOffsetX;
-    for (let i = 0; i < 5; i++) {
-      const s = getWindowScale(cxToNorm(cx));
-      const hw = (info.w * s) / 2;
-      const clamped = Math.min(Math.max(cx, hw), DESKTOP_W - hw);
-      if (Math.abs(clamped - cx) < 0.05) { cx = clamped; break; }
-      cx = clamped;
+    let scale;
+    if (drag.morphed) {
+      // The warp compresses a morphed window GEOMETRICALLY — applying the flat
+      // pipeline's getWindowScale on top double-shrinks it (the "accelerating
+      // scale" bug). Freeze the grab scale; the warp does ALL the compressing.
+      scale = drag.grabScale;
+      // Logical-overscroll clamp: the logical desktop edge renders at only
+      // f⁻¹(1) ≈ 0.78 of the physical half-width — an invisible wall. Allow the
+      // logical center out to (2 + WARP_STRENGTH)·half-width so the compressed
+      // VISUAL edge can reach the physical bezel (plans/vertex-warp-experiment.md).
+      const hw = (info.w * scale) / 2;
+      const maxCx = (DESKTOP_W / 2) * (2 + WARP_STRENGTH) - hw;
+      cx = Math.min(Math.max(cx, DESKTOP_W - maxCx), maxCx);
+    } else {
+      // X: free drag with self-consistent clamp.
+      // scale depends on cx, so halfW depends on cx — a single-pass clamp undershoots
+      // (the clamped position is less compressed → larger halfW → edge overshoots 0).
+      // Iterate to convergence: typically done in 3–4 steps.
+      for (let i = 0; i < 5; i++) {
+        const s = getWindowScale(cxToNorm(cx));
+        const hw = (info.w * s) / 2;
+        const clamped = Math.min(Math.max(cx, hw), DESKTOP_W - hw);
+        if (Math.abs(clamped - cx) < 0.05) { cx = clamped; break; }
+        cx = clamped;
+      }
+      scale = getWindowScale(cxToNorm(cx));
     }
-    const scale = getWindowScale(cxToNorm(cx));
 
     // Y: anchor window top to cursor, hard clamped.
     const halfH = (info.h * scale) / 2;
@@ -353,7 +429,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
 
     // Drag Rails: recompute the band every frame — horizontal drift into the flank
     // changes localScale (and thus the gridYcoord band) even with no vertical motion.
-    writeDragBand(cx, cy, scale, info);
+    writeDragBand(cx, cy, scale, info, drag.morphed, drag.morphMode);
     invalidate();
   });
 

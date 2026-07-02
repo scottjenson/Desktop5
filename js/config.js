@@ -60,6 +60,14 @@ export const HIGHLIGHT_THICKNESS = 2.2; // core/glow width multiplier for highli
 export const HIGHLIGHT_FADE_IN_MS  = 150; // u_dragActive 0→1 on mousedown
 export const HIGHLIGHT_FADE_OUT_MS = 250; // u_dragActive 1→0 on mouseup
 
+// Window texture supersample (Pass 1 "B", plans/morph-readability.md): rasterize each
+// window's DOM at this factor (CSS zoom + enlarged source bitmap; mesh size unchanged)
+// so GPU minification during morph/park has more texels. three r184 hardcodes LINEAR
+// filtering for HTMLTexture uploads (no mipmaps), so this is the only quality lever.
+// 1 = off (exact legacy behavior). Costs ~SS² texture memory + repaint px. Try 2 and
+// compare parked/morphed text; if full-size windows look softer, drop back to 1.
+export const WINDOW_SUPERSAMPLE = 1;
+
 // Window Morph (demo): subdivide window meshes so vertices can bend along the grid warp.
 // At u_warpBlend = 0 a subdivided plane renders pixel-identical to a flat quad (~free).
 export const MORPH_SEGMENTS_X = 40; // horizontal segments — enough to bend smoothly across the warp boundary

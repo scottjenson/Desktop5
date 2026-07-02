@@ -7,6 +7,7 @@ The product is a web prototype that renders standard HTML/CSS application window
 **Planning & design docs live in `plans/`.** Read the relevant one before working on that subsystem:
 * `plans/grid.md` — the desktop background "UX tension grid" shader (anamorphic warp, glow lines) and the **Drag Rails** feature (built). Read before touching the background shader or window-drag feedback.
 * `plans/vertex-warp-experiment.md` — a PAUSED experiment (windows physically deforming to follow the grid). Read before any "warp the window mesh" idea — explains why it was abandoned (unreadable content).
+* `plans/morph-readability.md` — the ACTIVE plan to improve the morph's legibility (per-pixel fragment warp, shape variants, rigid-ink mode). Read before touching `morphMaterial` or the "0" demo key; contains hard constraints and non-obvious discoveries (closed-form fragment mapping, three.js mipmap block, chord-trapezoid).
 * `plans/CODE_REVIEW.md` — a dated, point-in-time review of the prototype.
 
 ---
@@ -124,7 +125,8 @@ Sluggish on a fanless laptop with the original setup: a fixed 3440×1440×2 buff
 
 | Key | File | Action |
 |-----|------|--------|
-| `0` | main.js | Toggle frontmost window's grid-following **morph** (resurrected vertex-warp experiment). Static in center; drag toward a flank to deform live — shows why morphing hurts legibility. A morphed window does not track the cursor while dragging (intentional). See `plans/vertex-warp-experiment.md`. |
+| `0` | main.js | Toggle frontmost window's grid-following **morph** (resurrected vertex-warp experiment, since made readable — see `plans/morph-readability.md`). Morphed windows now DRAG correctly to the bezel: the cursor is forward-warped into logical space, scale is frozen during the drag (the warp does the compressing), and the clamp allows logical overscroll. See `plans/vertex-warp-experiment.md` for the coordinate model. |
+| `-` | main.js | Toggle the frontmost window's morph SHAPE variant: faithful (curved, hugs grid) ↔ creased centered-Y (orthogonal in the dead zone, straight readable fold in the flank). The two survivors of the shape exploration — the rejected variants (chord, X-only, rectangle, rigid-ink) are documented in `plans/morph-readability.md`. Visible only while morphed (`0`). Logs the mode to the console. |
 | `1` | windows.js | Center the menubar into its pill (`translateX` animation). |
 | `2` | windows.js | Reveal / animate the grid. |
 | `3` | windows.js | Toggle all window meshes' `.visible` — clears the desktop before tab-switching to Demo 3. |

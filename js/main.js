@@ -7,7 +7,7 @@
 // own source canvas to get an independent, live-updating texture.
 
 import * as THREE from 'three';
-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_EDGE_FADE_FLOOR, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X } from './config.js';
+import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, WINDOW_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_EDGE_FADE_FLOOR, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X } from './config.js';
 import { initWindows } from './windows.js';
 
 // ── CSS custom properties (derived from config.js) ────────
@@ -246,7 +246,7 @@ function htmlTexture(el) {
 // A vertex sits at logical world-X xw; we need the physical screen-X xs where f(xs)=xw.
 // Newton-Raphson (4 iters, smooth monotonic f → sub-pixel) inverts it. The compiled
 // shader is stashed on mat.userData.shader so setWarpBlend() can drive u_warpBlend.
-function morphMaterial(el) {
+function morphMaterial(el, geomHalfW, geomHalfH) {
   const mat = new THREE.MeshBasicMaterial({ map: htmlTexture(el), transparent: true, alphaTest: 0.5 });
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.u_halfPlaneW   = { value: planeW / 2 };
@@ -254,6 +254,11 @@ function morphMaterial(el) {
     shader.uniforms.u_warpPower    = { value: WARP_POWER };
     shader.uniforms.u_warpStrength = { value: WARP_STRENGTH };
     shader.uniforms.u_warpBlend    = { value: mat.userData.pendingWarpBlend ?? 0.0 };
+    shader.uniforms.u_geomHalfW    = { value: geomHalfW }; // window half-size in world units
+    shader.uniforms.u_geomHalfH    = { value: geomHalfH };
+    // Shape variant, toggled by the "-" key (plans/morph-readability.md):
+    // 0 faithful (curved) · 1 creased centered-Y (readable fold)
+    shader.uniforms.u_morphMode    = { value: mat.userData.pendingMorphMode ?? 0.0 };
 
     shader.vertexShader = `
       uniform float u_halfPlaneW;
@@ -261,6 +266,33 @@ function morphMaterial(el) {
       uniform float u_warpPower;
       uniform float u_warpStrength;
       uniform float u_warpBlend;
+      uniform float u_geomHalfW;
+      uniform float u_geomHalfH;
+      uniform float u_morphMode;
+      varying vec2 v_phys;   // fragment's POST-warp (physical) world xy
+      varying vec4 v_winExt; // window extent: (logical xwL, logical xwR, center world y, world height)
+      // Fold description for the fragment's exact piecewise inverse (modes 1/3):
+      varying vec4 v_foldW;  // logical  x of (left edge, left hinge, right hinge, right edge)
+      varying vec4 v_foldX;  // physical x of the same four points
+      varying vec4 v_foldS;  // grid localScale at the same four points
+
+      // Same math as the original inline Newton block, factored into functions so
+      // the shape variants can also solve the WINDOW EDGES (chord/rect modes need
+      // the edge positions to straighten between grid-locked corners).
+      float warpDerivAt(float xs) {
+        float flankDist = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+        return u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0)) * u_warpStrength / (1.0 - u_warpDeadzone);
+      }
+      float localScaleAt(float xs) { return 1.0 / (1.0 + warpDerivAt(xs)); }
+      float newtonInverse(float xw) {
+        float xs = xw; // initial guess; smooth monotonic f → sub-pixel in 4 iters
+        for (int i = 0; i < 4; i++) {
+          float flankDist = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+          float warp = sign(xs) * pow(flankDist, u_warpPower) * u_warpStrength;
+          xs -= ((xs + warp) - xw) / (1.0 + warpDerivAt(xs));
+        }
+        return xs;
+      }
     ` + shader.vertexShader;
 
     // Replace the standard projection with our warped one. <project_vertex> normally does:
@@ -272,36 +304,148 @@ function morphMaterial(el) {
         vec4 squashedWorld = modelMatrix * vec4(transformed, 1.0);
         float xw = squashedWorld.x / u_halfPlaneW;        // logical pos, -1..1
 
-        float xs = xw;                                     // Newton initial guess
-        for (int i = 0; i < 4; i++) {
-          float flankDist  = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
-          float warp       = sign(xs) * pow(flankDist, u_warpPower) * u_warpStrength;
-          float innerDeriv = 1.0 / (1.0 - u_warpDeadzone);
-          float deriv      = u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0))
-                             * u_warpStrength * innerDeriv;
-          float error  = (xs + warp) - xw;
-          float fPrime = 1.0 + deriv;
-          xs = xs - error / fPrime;
+        // Window logical extent (modelMatrix origin = window center; [0][0]/[1][1]
+        // = mesh scale — windows never rotate).
+        float sclX = modelMatrix[0][0];
+        float sclY = modelMatrix[1][1];
+        float cxw  = modelMatrix[3][0];
+        float xwL  = (cxw - u_geomHalfW * sclX) / u_halfPlaneW;
+        float xwR  = (cxw + u_geomHalfW * sclX) / u_halfPlaneW;
+
+        // FAITHFUL mapping (mode 0, the original): Newton-solve this vertex's
+        // physical x; Y scales by the grid's localScale AT THIS VERTEX, so the
+        // deeper edge foreshortens more → curved-edge trapezoid hugging the grid
+        // lines, plus the accepted drift toward the screen equator.
+        float xs = newtonInverse(xw);
+        float localScale = localScaleAt(xs);
+
+        // Both modes keep the window corners locked to the grid curve (xsL/xsR are
+        // the faithful edge solutions). The crease placement is linear in LOGICAL x
+        // per fold piece, so its Y-scale is linear in PHYSICAL x → straight edges.
+        float xsL = newtonInverse(xwL);
+        float xsR = newtonInverse(xwR);
+
+        // Fold description: three x-pieces [edge | hinge]—[identity]—[hinge | edge],
+        // creased at the dead-zone boundary. Hinges clamp to the window span, so
+        // fully-in-flank degenerates to a plain chord and fully-in-center to
+        // identity. Shared with the fragment shader via varyings so its per-pixel
+        // inverse uses the SAME piecewise map.
+        float hingeLw = clamp(-u_warpDeadzone, xwL, xwR);
+        float hingeRw = clamp( u_warpDeadzone, xwL, xwR);
+        float xsHL = newtonInverse(hingeLw);
+        float xsHR = newtonInverse(hingeRw);
+        v_foldW = vec4(xwL, hingeLw, hingeRw, xwR);
+        v_foldX = vec4(xsL, xsHL, xsHR, xsR);
+        v_foldS = vec4(localScaleAt(xsL), localScaleAt(xsHL), localScaleAt(xsHR), localScaleAt(xsR));
+
+        float xsFinal; float yScaleSel; float yPivot = 0.0; // pivot 0 = screen equator
+        if (u_morphMode < 0.5) {                 // 0 faithful — silk (curved edges)
+          xsFinal = xs;
+          yScaleSel = localScale;
+        } else {
+          // 1 creased centered-Y — orthogonal inside the dead zone, straight chord
+          // over the flank portion only (gradual onset like faithful), Y converging
+          // about the WINDOW centerline so text shear stays gentle and lines don't
+          // fan (equator-pulled shear mangles fold text — plan: C findings).
+          float foldScale;
+          if (xw >= hingeRw) {
+            float t   = (xw - hingeRw) / max(xwR - hingeRw, 1e-6);
+            xsFinal   = mix(xsHR, xsR, t);
+            foldScale = mix(v_foldS.z, v_foldS.w, t);
+          } else if (xw <= hingeLw) {
+            float t   = (hingeLw - xw) / max(hingeLw - xwL, 1e-6);
+            xsFinal   = mix(xsHL, xsL, t);
+            foldScale = mix(v_foldS.y, v_foldS.x, t);
+          } else {
+            xsFinal = xw;                        // dead zone: warp is identity here
+            foldScale = 1.0;
+          }
+          yScaleSel = foldScale;
+          yPivot = modelMatrix[3][1];            // window centerline, not equator
         }
 
-        // Blend flat (xw) ↔ warped (xs).
-        float finalNorm = mix(xw, xs, u_warpBlend);
-        squashedWorld.x = finalNorm * u_halfPlaneW;
+        // Blend flat ↔ warped. Y scales about yPivot (pivot 0 reduces to the
+        // original y *= mix(1, yScale, blend) — equator pull).
+        squashedWorld.x = mix(xw, xsFinal, u_warpBlend) * u_halfPlaneW;
+        squashedWorld.y = mix(squashedWorld.y, yPivot + (squashedWorld.y - yPivot) * yScaleSel, u_warpBlend);
 
-        // Y pull (full original): scale each vertex's Y by the GRID's localScale at its
-        // solved physical position xs, toward world Y=0. Because xs differs across the
-        // window's width (left edge deeper in the flank → smaller localScale), the left
-        // edge foreshortens more than the right → the trapezoid. Also drifts the window
-        // toward the screen equator (accepted for the static toggle).
-        float finalFlank = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
-        float finalDeriv = u_warpPower * pow(finalFlank, max(0.0, u_warpPower - 1.0))
-                           * u_warpStrength * (1.0 / (1.0 - u_warpDeadzone));
-        float localScale = 1.0 / (1.0 + finalDeriv);
-        float yScale = mix(1.0, localScale, u_warpBlend);
-        squashedWorld.y *= yScale;
+        // Pass 1 (plans/morph-readability.md): per-pixel content-mapping inputs.
+        // v_phys is the fragment's actual physical position (positions interpolate
+        // exactly); v_winExt the window's logical extent.
+        v_phys = squashedWorld.xy;
+        v_winExt = vec4(xwL, xwR, modelMatrix[3][1], u_geomHalfH * 2.0 * sclY);
 
         vec4 mvPosition = viewMatrix * squashedWorld;
         gl_Position = projectionMatrix * mvPosition;
+      `
+    );
+
+    // Fragment side of Pass 1: per-pixel inverse of the vertex warp. A fragment
+    // knows its PHYSICAL x, so the logical coordinate is the closed-form FORWARD
+    // warp f(xs) — no Newton iteration needed in this direction. This replaces the
+    // sliver-interpolated UVs (content was grid-exact only at the 41 vertex
+    // columns) with an exact mapping at every pixel: the 40 sampling seams vanish.
+    shader.fragmentShader = `
+      uniform float u_halfPlaneW;
+      uniform float u_warpDeadzone;
+      uniform float u_warpPower;
+      uniform float u_warpStrength;
+      uniform float u_warpBlend;
+      uniform float u_morphMode;
+      varying vec2 v_phys;
+      varying vec4 v_winExt;
+      varying vec4 v_foldW;
+      varying vec4 v_foldX;
+      varying vec4 v_foldS;
+    ` + shader.fragmentShader;
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      /* glsl */`
+        #ifdef USE_MAP
+          float xs_f    = v_phys.x / u_halfPlaneW;
+          float flank_f = max(0.0, abs(xs_f) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+          float xw_f    = xs_f + sign(xs_f) * pow(flank_f, u_warpPower) * u_warpStrength;
+          float deriv_f = u_warpPower * pow(flank_f, max(0.0, u_warpPower - 1.0)) * u_warpStrength / (1.0 - u_warpDeadzone);
+          float ls_f    = 1.0 / (1.0 + deriv_f);
+          float uW = (xw_f - v_winExt.x) / max(v_winExt.y - v_winExt.x, 1e-6);
+          // Y: undo the vertex Y-pull at this fragment's x (same blend as the pull).
+          float vW = (v_phys.y / mix(1.0, ls_f, u_warpBlend) - v_winExt.z) / max(v_winExt.w, 1e-6) + 0.5;
+
+          // Per-pixel content mapping:
+          //   0 faithful — smooth-warp inverse (uW/vW above).
+          //   1 creased centered-Y — exact PIECEWISE inverse of the fold. Plain
+          //     vMapUv is NOT enough: interpolating UVs across the converging
+          //     (trapezoid) quads is only affine per triangle, and the fold
+          //     concentrates the scale change into few segments ⇒ visible
+          //     per-segment ripple that mangles text (tested; plan: C findings).
+          vec2 contentUv;
+          if (u_morphMode < 0.5) {
+            contentUv = clamp(vec2(uW, vW), 0.0, 1.0);
+          } else {
+            float xs_p = v_phys.x / u_halfPlaneW;
+            float xw_p; float s_p;
+            if (xs_p >= v_foldX.z) {        // right fold piece
+              float t = (xs_p - v_foldX.z) / max(v_foldX.w - v_foldX.z, 1e-6);
+              xw_p = mix(v_foldW.z, v_foldW.w, t);
+              s_p  = mix(v_foldS.z, v_foldS.w, t);
+            } else if (xs_p <= v_foldX.y) { // left fold piece
+              float t = (v_foldX.y - xs_p) / max(v_foldX.y - v_foldX.x, 1e-6);
+              xw_p = mix(v_foldW.y, v_foldW.x, t);
+              s_p  = mix(v_foldS.y, v_foldS.x, t);
+            } else {                        // identity piece (dead zone)
+              xw_p = xs_p;
+              s_p  = 1.0;
+            }
+            float uP = (xw_p - v_winExt.x) / max(v_winExt.y - v_winExt.x, 1e-6);
+            float yLog = v_winExt.z + (v_phys.y - v_winExt.z) / mix(1.0, s_p, u_warpBlend);
+            float vP = (yLog - v_winExt.z) / max(v_winExt.w, 1e-6) + 0.5;
+            contentUv = clamp(vec2(uP, vP), 0.0, 1.0);
+          }
+          vec2 morphUv = mix(vMapUv, contentUv, u_warpBlend);
+          vec4 sampledDiffuseColor = texture2D( map, morphUv );
+          diffuseColor *= sampledDiffuseColor;
+        #endif
       `
     );
     mat.userData.shader = shader; // expose for u_warpBlend toggling
@@ -315,6 +459,15 @@ function setWarpBlend(mesh, value) {
   const mat = mesh.material;
   mat.userData.pendingWarpBlend = value;
   if (mat.userData.shader) mat.userData.shader.uniforms.u_warpBlend.value = value;
+}
+
+// Set a window mesh's morph SHAPE variant (0 faithful / 1 creased centered-Y).
+// Same lazy-compile tolerance as setWarpBlend. Visible only while morphed.
+const MORPH_MODE_NAMES = ['faithful (curved, hugs grid)', 'creased centered-Y (readable fold)'];
+function setMorphMode(mesh, mode) {
+  const mat = mesh.material;
+  mat.userData.pendingMorphMode = mode;
+  if (mat.userData.shader) mat.userData.shader.uniforms.u_morphMode.value = mode;
 }
 
 // ── Menubar — own canvas/mesh so animation repaints only its small bitmap ──
@@ -355,16 +508,27 @@ await Promise.all(sources.map(async (canvas, i) => {
   canvas.innerHTML = html;
 
   const el = canvas.querySelector('.os-window');
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = canvas.width;  // design size in DESKTOP px (index.html attributes);
+  const h = canvas.height; // all mesh/clamp/registry math stays in this space
+
+  // Supersample (Pass 1 "B", plans/morph-readability.md): enlarge the bitmap and
+  // lay the DOM out at SS× via CSS zoom, so GPU minification during morph/park has
+  // SS× the texels (three r184 hardcodes LINEAR filtering for HTMLTexture — no
+  // mipmaps — so this is the only quality lever). At SS = 1 this is byte-identical
+  // to the old path. Hit rects measured below come back in zoomed px → ÷SS.
+  const SS = WINDOW_SUPERSAMPLE;
+  canvas.width = w * SS;
+  canvas.height = h * SS;
 
   // Pin both the source canvas and the window to exact pixels so the subtree
   // lays out at exactly the bitmap size (no %-of-ambiguous-containing-block
-  // squashing while the canvas is parked off-screen).
-  canvas.style.width = w + 'px';
-  canvas.style.height = h + 'px';
+  // squashing while the canvas is parked off-screen). With zoom, the element's
+  // rendered size is w×SS px — still exactly the bitmap size (Learning #1).
+  canvas.style.width = canvas.width + 'px';
+  canvas.style.height = canvas.height + 'px';
   el.style.width = w + 'px';
   el.style.height = h + 'px';
+  el.style.zoom = SS;
 
   // Subdivided 40×1 so vertices can bend along the grid warp (Window Morph demo).
   // At u_warpBlend = 0 (default) this renders pixel-identical to a flat quad.
@@ -372,9 +536,15 @@ await Promise.all(sources.map(async (canvas, i) => {
     new THREE.PlaneGeometry(w * S, h * S, MORPH_SEGMENTS_X, 1),
     // alphaTest discards the transparent rounded corners so they don't write
     // depth and punch holes through windows stacked behind them.
-    // morphMaterial adds the gated vertex warp (u_warpBlend = 0 → flat).
-    morphMaterial(el)
+    // morphMaterial adds the gated vertex warp (u_warpBlend = 0 → flat) and the
+    // per-pixel content mapping (Pass 1); half-sizes feed v_winExt.
+    morphMaterial(el, (w * S) / 2, (h * S) / 2)
   );
+  // The morph vertex shader displaces geometry far from mesh.position: with the
+  // logical-overscroll drag clamp, the position can sit OUTSIDE the frustum while
+  // the warped window is visibly on-screen. Default bbox culling would blink the
+  // window out mid-drag (~80% of the way to the bezel), so cull manually never.
+  mesh.frustumCulled = false;
 
   const x = Number(canvas.dataset.x);
   const y = Number(canvas.dataset.y);
@@ -402,7 +572,8 @@ await Promise.all(sources.map(async (canvas, i) => {
     if (hitEl) {
       const cr = canvas.getBoundingClientRect();
       const hr = hitEl.getBoundingClientRect();
-      playHitRect = { x: hr.left - cr.left, y: hr.top - cr.top, w: hr.width, h: hr.height };
+      // gBCR returns zoomed px; ÷SS keeps hit rects in design px (uv·info.w space).
+      playHitRect = { x: (hr.left - cr.left) / SS, y: (hr.top - cr.top) / SS, w: hr.width / SS, h: hr.height / SS };
     }
   }
 
@@ -414,7 +585,7 @@ await Promise.all(sources.map(async (canvas, i) => {
     const cr = canvas.getBoundingClientRect();
     fileHits = [...canvas.querySelectorAll('.finder-file')].map((fileEl) => {
       const hr = fileEl.getBoundingClientRect();
-      return { el: fileEl, x: hr.left - cr.left, y: hr.top - cr.top, w: hr.width, h: hr.height };
+      return { el: fileEl, x: (hr.left - cr.left) / SS, y: (hr.top - cr.top) / SS, w: hr.width / SS, h: hr.height / SS };
     });
   }
 
@@ -443,6 +614,19 @@ window.addEventListener('keydown', (e) => {
   invalidate();
 });
 
+// "-" toggles the frontmost window's morph SHAPE variant (plans/morph-readability.md):
+// faithful (curved) ↔ creased centered-Y (readable fold) — the two survivors of the
+// shape exploration; both keep the corners locked to the grid curve. Only visible
+// while the window is morphed ("0"). Mode persists per window.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== '-' || !windowMeshes.length) return;
+  const front = windowMeshes.reduce((a, b) => (b.mesh.position.z > a.mesh.position.z ? b : a));
+  const mode = ((front.mesh.material.userData.pendingMorphMode ?? 0) + 1) % 2;
+  setMorphMode(front.mesh, mode);
+  console.log(`[morph] ${front.id}: mode ${mode} — ${MORPH_MODE_NAMES[mode]}`);
+  invalidate();
+});
+
 // "4" resets every window to its original position/scale/morph/visibility so the demo
 // can be re-run without reloading. Touches windows ONLY — the menubar and grid lines
 // (their own meshes/uniforms) are left exactly as they are.
@@ -453,6 +637,7 @@ window.addEventListener('keydown', (e) => {
     win.mesh.scale.set(1, 1, 1);
     win.mesh.visible = true;
     setWarpBlend(win.mesh, 0);
+    setMorphMode(win.mesh, 0);
   }
   windowsApi.resetStack(); // restore stack order so the next click doesn't reshuffle z
   invalidate();
