@@ -1,6 +1,6 @@
 # System Context & Architecture: 3D HTML-in-Canvas Window Manager
 
-**To the coding agent (Claude):** Read this fully before generating code. It is both the architectural blueprint and a record of what we learned building it — the **Learnings** and **Anti-Patterns** sections are load-bearing; follow them.
+**To the coding agent (Claude):** Read this fully before generating code. It is both the architectural blueprint and a record of what we learned building it — the **Learnings** section is load-bearing, and each learning's bolded **Rule** is binding.
 
 The product is a web prototype that renders standard HTML/CSS application windows **inside** a WebGL 3D scene using Chrome's experimental HTML-in-canvas API, so windows can be spatially manipulated (depth, dragging) while remaining real DOM. Windows are **flat**: they translate and recede in depth, but never rotate or tilt.
 
@@ -13,7 +13,7 @@ The product is a web prototype that renders standard HTML/CSS application window
 ## 🛠 Technology Stack & Constraints
 
 * **3D library:** Vanilla Three.js, **`r184+` strictly required** (first version with `HTMLTexture`). Loaded via importmap from CDN.
-* **Frameworks:** **NONE.** No React/Vue/R3F, no drei `<Html>`. Vanilla JS modules only.
+* **Frameworks:** **NONE.** No React/Vue/R3F, no drei `<Html>`, no `html2canvas` — HTML renders *into* WebGL via `HTMLTexture`. Vanilla JS modules only.
 * **Core feature:** Chrome **HTML-in-canvas** via the `layoutsubtree` canvas attribute + `THREE.HTMLTexture`.
 * **Styling:** Plain CSS (Flexbox, variables, `border-radius`) on DOM nodes hosted inside source canvases.
 * **No build step.** ES modules + `fetch()` of window fragments ⇒ the project **must be served over HTTP**. `file://` breaks both module imports and fragment fetches.
@@ -28,7 +28,7 @@ There are **two kinds** of canvas:
 * **One visible WebGL canvas** (`#gl`) — the Three.js render target and the **only pointer-event surface**. It composites the whole scene. No `layoutsubtree`.
 * **N hidden `<canvas layoutsubtree>` source canvases** (parked off-screen at `left:-99999px`) — one for the desktop **chrome**, one for the **menubar**, and **one per window**. Each rasterizes its DOM subtree into its own `HTMLTexture`. Off-screen canvases still rasterize (validated).
 
-**Why one source canvas per window (do not "simplify" this):** `THREE.HTMLTexture` wires repaints via `parent.onpaint`, where `parent` is the element's host canvas. `onpaint` is a **single-slot property** (last writer wins), so windows sharing one canvas ⇒ only one gets a live texture. Independent live textures require independent source canvases — which is also what enables real per-window mesh depth. `HTMLTexture(element)` requires `element.parentNode` to be the `layoutsubtree` canvas.
+**Why one source canvas per window (do not "simplify" this):** `HTMLTexture(element)` requires `element.parentNode` to be a `layoutsubtree` canvas at construction, and each window needs its own px-sized canvas as an unambiguous containing block for initial layout (Learning #1). Separate canvases are also what enables real per-window mesh depth. Runtime reality (r184): on each texture's first render, three.js **reparents the element into `#gl`** and multiplexes all repaints through one shared `#gl.onpaint` via `event.changedElements` — the constructor's per-source-canvas `onpaint` (a single-slot property, last writer wins) only matters until then. See Learning #9.
 
 ```
 #gl                         ← visible WebGL output, all input lands here
@@ -45,12 +45,14 @@ index.html      #gl output canvas + hidden #sources (chrome/menubar inline + one
 css/base.css    reset, :root vars, #gl letterbox positioning, #sources off-screen parking
 css/desktop.css chrome: wallpaper, menubar, dock, trash + SHARED window frame (.os-window, titlebar)
 css/windows.css per-window INTERNAL styles only (no size/position)
-js/config.js    constants: DESKTOP_W/H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, FOV, CAMERA_Z, Z_STEP,
-                           PLATEAU_FRAC, SHRINK_FRAC, SHRUNK_PX, SNAP_ZONE_STEP
-js/main.js      scene/camera/renderer; discovers sources, builds texture+mesh per window; render loop;
-                caches scrollEl per window at init; "0" morph + "4" reset demo keys
-js/windows.js   raycaster focus + titlebar drag; bounded z-slot stacking; 6-zone shift-drag;
-                park-all animation engine; frontmost-window scroll routing; "1"/"2"/"3" demo keys
+js/config.js    ALL shared constants (single source of truth): desktop/camera dims, drag-shrink +
+                warp dials (shared with the grid shader), grid look, shake/stash, music compact
+js/main.js      scene/camera/renderer; discovers sources, builds texture+mesh per window; ON-DEMAND
+                render loop (invalidate() + texture.version polling — Learning #12); caches scrollEl
+                per window at init; "0" morph + "4" reset demo keys
+js/windows.js   raycaster focus + titlebar drag; bounded z-slot stacking; shift-drag edge snap;
+                shake-to-stash + shift-click stash; mesh animation engine; frontmost-window
+                scroll routing; "1"/"2"/"3" demo keys
 windows/*.html  five window fragments (finder, obsidian, browser, music, wordprocessor)
 ```
 
@@ -61,7 +63,7 @@ windows/*.html  five window fragments (finder, obsidian, browser, music, wordpro
 
 ### Interaction (`js/windows.js`)
 * All input is on `#gl`. `Raycaster.setFromCamera(ndc)` → `intersectObjects(windowMeshes)`; **closest hit = topmost** (true 3D z-order, no z-index bookkeeping).
-* **Drag:** if the hit `uv` is within the top `TITLEBAR_H` px, project the ray onto the window's z-plane and move the mesh so the grabbed point tracks the cursor. Clamp the window **center** in desktop-px space (inside menubar/dock margins).
+* **Drag:** if the hit `uv` is within the top `TITLEBAR_H` px (or anywhere on the window when shift is held or the window is icon-sized), project the ray onto the window's z-plane and move the mesh so the grabbed point tracks the cursor. Clamp the window **center** in desktop-px space (inside menubar/dock margins).
 
 ### Depth & stacking
 * Chrome plane at `z=0`. Windows occupy **fixed z-slots by stack rank**: `z = (rank+1) * Z_STEP`. Focus moves the clicked window to the top and **restacks**, so z stays bounded (see Learning #3).
@@ -73,7 +75,7 @@ windows/*.html  five window fragments (finder, obsidian, browser, music, wordpro
 2. **Styles:** add internal styles to `css/windows.css`, scoped with `#win-<name>`. For a dark titlebar, override `#win-<name> .win-titlebar`.
 3. **Source canvas:** add one line under `#sources` in `index.html`:
    `<canvas class="src" data-id="<name>" data-x="<px>" data-y="<px>" layoutsubtree width="<w>" height="<h>"></canvas>`
-   — `width/height` = window size; `data-x/data-y` = initial desktop-px top-left; DOM order is back→front.
+   — `width/height` = window size; `data-x/data-y` = initial desktop-px top-left; DOM order is back→front. The `layoutsubtree` attribute is mandatory — without it the subtree won't rasterize.
 4. **That's it.** `main.js` auto-discovers `#sources .src[data-id]`, fetches the fragment, pins exact px (Learning #1), builds the texture + mesh, and registers it for raycasting. No JS edits required.
 
 ---
@@ -83,7 +85,7 @@ windows/*.html  five window fragments (finder, obsidian, browser, music, wordpro
 Sizing a window `width:100%;height:100%` against an off-screen source canvas made `%` resolve against an ambiguous containing block ⇒ wrong layout, vertical squash. **Fix:** pin both the source-canvas CSS size and the `.os-window` to exact px equal to the canvas bitmap. **Rule: source DOM must be sized in explicit px matching its source-canvas bitmap.**
 
 **2. Fuzziness — render at device resolution.**
-A fixed drawing buffer is upscaled on retina ⇒ blurry text. **Fix:** `renderer.setPixelRatio(Math.min(devicePixelRatio, 2))`. If still soft, supersample the source canvases (rasterize ~2× the window px).
+A fixed drawing buffer is upscaled on retina ⇒ blurry text. **Fix:** size the buffer to the pixels actually displayed — now done dynamically in `fitCanvas()`: displayed CSS px × `max(devicePixelRatio, RENDER_SUPERSAMPLE)`, capped at `DESKTOP × RENDER_SUPERSAMPLE` (see Learning #12). If still soft, supersample the source canvases (rasterize ~2× the window px).
 
 **3. Z-ordering growth — use bounded z-slots, never a running z.**
 `topZ += Z_STEP` pushed windows monotonically toward the camera, so under perspective each click made them visibly grow. **Fix:** assign z by stack rank (`(rank+1)*Z_STEP`) and restack on focus. **Rule: under a perspective camera, never stack with an ever-increasing z** — use bounded slots (or `renderOrder`).
@@ -98,11 +100,11 @@ Receding windows via CSS `transform: scale()` + `opacity` in one shared texture 
 **7. Isolate high-frequency canvases — small canvas = cheap repaint.**
 The menubar (3440×39) was originally inside the 3440×1440 chrome canvas; every CSS transition repainted 5M pixels at 60fps. Its own 90k-pixel canvas made animation free. **Rule: any element that animates / needs frequent `requestPaint` gets its own source canvas sized to just that element.**
 
-**8. Park-all UX — clicking any window ends the park session.**
-The shift-hold-1s park gesture moves all full-size windows to 50% mid-zones. A subsequent click/drag clears `parkedWindows` entirely on `mousedown`, so shift-release does not restore the others — the click signals "I'm done parking." **Rule: mousedown during park state = session over; clear `parkedWindows`, leave everything in place.**
+**8. Stash gesture — shake to stash; deliberately stateless.**
+Shaking a dragged window (≥`SHAKE_COUNT` direction reversals of ≥`SHAKE_MIN_TRAVEL` px within `SHAKE_WINDOW_MS`) calls `stashAll()`: every OTHER full-size window animates to a 50% stash zone on its own side; the dragged window stays under the cursor. No session state — nothing is remembered or restored on release; windows stay where they were stashed. (This replaced an earlier shift-hold-1s "park-all" that kept a `parkedWindows` session; the session bookkeeping was removed on purpose — don't reintroduce it.)
 
-**9. Cache scrollable DOM refs at init — `layoutsubtree` hides the DOM at runtime.**
-After the first `onpaint`, Chrome moves source-canvas children into an internal tree; `canvas.querySelectorAll('*')` returns 0 at runtime. Scroll routing caches `scrollEl` refs in `main.js` at init (while the DOM is accessible) and stores them per `windowMeshes` entry; wheel events on `#gl` route `deltaY` to `top.scrollEl.scrollTop`. **Do not query source-canvas DOM after init.**
+**9. Cache DOM refs at init — three.js reparents source elements into `#gl` on first render.**
+r184's `HTMLTexture` upload path (in `WebGLTextures`) moves each element out of its source canvas into the visible `#gl` canvas (adding `layoutsubtree` to it) and multiplexes ALL repaint events through one shared `#gl.onpaint`, demultiplexed via `event.changedElements`. Consequences: source canvases are **empty** at runtime (`canvas.querySelectorAll('*')` returns 0 there — the DOM moved into `#gl`; it isn't hidden); cached element refs keep working because references survive reparenting; and `sourceCanvas.requestPaint()` is a **no-op** after first render — repaints fire automatically from `#gl` when the reparented DOM mutates (this is what the render loop's `texture.version` polling watches). Scroll routing caches `scrollEl` refs in `main.js` at init and stores them per `windowMeshes` entry; wheel events on `#gl` route `deltaY` to `top.scrollEl.scrollTop`. **Cache refs at init anyway — it's simpler and doesn't depend on three.js internals.** (Earlier revisions of this learning blamed Chrome "hiding the DOM in an internal tree"; the reparenting above is the actual mechanism.)
 
 **10. `layoutsubtree` pointer-event hit-testing is broken under CSS transforms in Chrome Canary.**
 We tried a "CSS proxy layer" — visible source canvases aligned to WebGL meshes via CSS transforms for native scroll/click/hover. Visual alignment worked, but hit regions did **not** follow the transform under any approach (`matrix3d` on the canvas, `left/top` inside a `scale()` parent, `position:fixed`, `CSS3DRenderer`). **Do not re-attempt.** The correct interactivity path is raycaster `uv` → window-local px → `elementFromPoint` → synthetic events.
@@ -110,20 +112,13 @@ We tried a "CSS proxy layer" — visible source canvases aligned to WebGL meshes
 **11. Color space — `MeshBasicMaterial` + `HTMLTexture` washes out unless output stays linear.**
 Saturated colors crushed; near-black/near-white survived. Cause: Three.js r152+ defaults `outputColorSpace = SRGBColorSpace`, which gamma-encodes output, but `MeshBasicMaterial` is an unlit blit with no linearization counterpart, so the encode darkens everything. **Fix (one line): `renderer.outputColorSpace = THREE.LinearSRGBColorSpace;`** Textures keep `t.colorSpace = SRGBColorSpace` (still linearize on the way in); only the OUTPUT encode is disabled. The grid shader plane is unaffected (writes final colors directly). Diagnosis trick: temporarily un-park `#sources` (`left:0`) to view the raw rasterization directly. Porting the shader elsewhere: `THREE.Color` linearizes hex literals, so a raw-WebGL port must sRGB→linear convert colors itself.
 
----
-## 🚨 Anti-Patterns (DO NOT) — each maps to a Learning above
-1. **Don't** put all windows in one `layoutsubtree` canvas expecting independent live textures — `onpaint` is single-slot (Topology).
-2. **Don't** fake per-window depth with CSS `transform`/`opacity` — use real `mesh.position.z` (Learning #4).
-3. **Don't** stack windows with a monotonically increasing z (Learning #3).
-4. **Don't** size source DOM with `%` (Learning #1).
-5. **Don't** use R3F or `html2canvas`; render HTML *into* WebGL via `HTMLTexture`. `CSS3DRenderer` also fails for overlay hit-testing (Learning #10).
-6. **Don't** attempt a "CSS proxy overlay" for native pointer events — hit regions don't follow CSS transforms in this Canary build (Learning #10).
-7. **Don't** forget `layoutsubtree` on source canvases, or the subtree won't rasterize.
+**12. Performance — the app is GPU fill-rate bound; render small and only on change.**
+Sluggish on a fanless laptop with the original setup: a fixed 3440×1440×2 buffer (~20M px) with MSAA, two fullscreen shaded layers (grid shader + transparent chrome plane), rendered unconditionally every rAF. Three fixes, all shipped: **(a)** buffer sized in `fitCanvas()` to displayed CSS px × `max(devicePixelRatio, RENDER_SUPERSAMPLE)`, capped at `DESKTOP × RENDER_SUPERSAMPLE` — ~4× fewer fragments on a retina laptop, dpr-1 projector still gets ≥2× supersampling; **(b)** MSAA off — redundant with supersampling, `fwidth()` line AA, and axis-aligned quads; **(c)** render-on-demand: the rAF loop skips `renderer.render` unless `invalidate()` was called or an `HTMLTexture` repainted. Repaints are detected by polling `texture.version` — `needsUpdate` is a **setter-only** property that bumps `version`, fed by Chrome's `onpaint` (Learning #9) — so all repaint paths are caught automatically. **Rule: any new code that mutates the scene outside a texture repaint (mesh transforms, uniforms, visibility, camera) MUST call `invalidate()` or its motion won't render.** Idle = zero GPU work, which also stops thermal throttling from degrading the frames during interaction.
 
 ---
 ## 📍 Status
 
-**Built:** per-window source-canvas meshes; raycaster focus + titlebar drag; bounded z-slot stacking; letterboxed ultrawide (3440×1440) desktop; device-resolution rendering; separate menubar canvas; 6-zone shift-drag with 100px ratchet; shift-click toggle full-size ↔ 50% mid-zone; shift-hold-1s park-all (cubic ease-out); frontmost-window scroll routing; five windows (finder, obsidian, browser, music, wordprocessor); UX tension grid shader + Drag Rails.
+**Built:** per-window source-canvas meshes; raycaster focus + titlebar drag; bounded z-slot stacking; letterboxed ultrawide (3440×1440) desktop; device-resolution rendering; separate menubar canvas; shift-drag edge-zone snap (±100px travel picks left/right); shift-click toggle full-size ↔ 50% stash zone; shake-to-stash (Learning #8); frontmost-window scroll routing; five windows (finder, obsidian, browser, music, wordprocessor); UX tension grid shader + Drag Rails; right-sized draw buffer + no-MSAA + on-demand rendering (Learning #12).
 
 **Demo keys** (used to stage the live walkthrough):
 

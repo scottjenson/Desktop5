@@ -62,7 +62,7 @@ function snapToStash(isLeft) {
 
 // ── Main ──────────────────────────────────────────────────
 
-export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform, dragActiveUniform, dragBandUniform }) {
+export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform, dragActiveUniform, dragBandUniform, invalidate }) {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const dragPlane = new THREE.Plane();
@@ -75,6 +75,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   const stack = [...windowMeshes];
   function restack() {
     stack.forEach((w, rank) => { w.mesh.position.z = (rank + 1) * Z_STEP; });
+    invalidate();
   }
   restack();
 
@@ -116,6 +117,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       const t = Math.min((performance.now() - start) / duration, 1);
       const e = 1 - Math.pow(1 - t, 3); // cubic ease-out, matches the mesh engine
       dragActiveUniform.value = from + (target - from) * e;
+      invalidate();
       if (t < 1) fadeRaf = requestAnimationFrame(step);
       else fadeRaf = 0;
     };
@@ -352,6 +354,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     // Drag Rails: recompute the band every frame — horizontal drift into the flank
     // changes localScale (and thus the gridYcoord band) even with no vertical motion.
     writeDragBand(cx, cy, scale, info);
+    invalidate();
   });
 
   // ── Animation engine ─────────────────────────────────────
@@ -371,6 +374,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   }
 
   function tickAnims() {
+    invalidate();
     const now = performance.now();
     for (let i = anims.length - 1; i >= 0; i--) {
       const a = anims[i];
@@ -452,6 +456,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       const t = Math.min((performance.now() - start) / duration, 1);
       const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; // cubic ease-in-out
       warpUniform.value = eased * WARP_STRENGTH;
+      invalidate();
       if (t < 1) requestAnimationFrame(warpTick);
     })();
   }
@@ -468,6 +473,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
         const t = Math.min((performance.now() - start) / duration, 1);
         const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
         revealUniform.value = from + (to - from) * eased;
+        invalidate();
         if (t < 1) {
           revealAnimId = requestAnimationFrame(tick);
         } else {
@@ -486,6 +492,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     if (e.key === '3') {
       windowsHidden = !windowsHidden;
       meshes.forEach((m) => { m.visible = !windowsHidden; });
+      invalidate();
     }
   });
 
@@ -535,6 +542,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       mesh.position.x = p.x;
       mesh.position.y = p.y;
       if (info === musicInfo) updateMusicCompact();
+      invalidate();
     } else if (drag?.shift && drag.activeZone === null && !drag.hasMoved) {
       // Shift-click: toggle between full-size center and mid-zone park.
       const { info, mesh } = drag;

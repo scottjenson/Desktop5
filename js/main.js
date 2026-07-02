@@ -19,13 +19,18 @@ r.setProperty('--snap-height', (DESKTOP_H - MENUBAR_H - DOCK_CLEARANCE) + 'px');
 
 // ── Renderer / scene / camera ─────────────────────────────
 const gl = document.getElementById('gl');
-const renderer = new THREE.WebGLRenderer({ canvas: gl, antialias: true });
-renderer.setSize(DESKTOP_W, DESKTOP_H, false); // fixed buffer; CSS handled below
-// Fixed supersample, deliberately NOT tied to devicePixelRatio: a projector reports
-// dpr 1 and would quarter the buffer, under-resolving the dense grid flanks. We render
-// large (DESKTOP × RENDER_SUPERSAMPLE) and let CSS downscale → projector-proof crispness.
-renderer.setPixelRatio(RENDER_SUPERSAMPLE);
+// No MSAA (antialias): the buffer is already supersampled (see fitCanvas), the grid
+// lines are analytically antialiased via fwidth(), and windows are axis-aligned quads
+// — multisampling a multi-megapixel buffer costs bandwidth for no visible gain.
+const renderer = new THREE.WebGLRenderer({ canvas: gl });
+renderer.setSize(DESKTOP_W, DESKTOP_H, false); // logical size; buffer = this × pixelRatio (fitCanvas)
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+
+// Render-on-demand: interaction/animation code calls invalidate() whenever it mutates
+// the scene (transforms, uniforms, visibility). Texture repaints are detected
+// separately, in the render loop, by polling texture.version.
+let needsRender = true;
+const invalidate = () => { needsRender = true; };
 
 const scene = new THREE.Scene();
 scene.background = null; // shader plane handles the background
@@ -34,11 +39,19 @@ scene.background = null; // shader plane handles the background
 const camera = new THREE.PerspectiveCamera(FOV, DESKTOP_W / DESKTOP_H, 0.1, 100);
 camera.position.z = CAMERA_Z;
 
-// CSS-scale the canvas to fit the viewport → black bars top/bottom.
+// CSS-scale the canvas to fit the viewport (black bars top/bottom) — and size the
+// drawing buffer to what is actually displayed, not a fixed DESKTOP × RENDER_SUPERSAMPLE.
+// Buffer px = displayed CSS px × max(devicePixelRatio, RENDER_SUPERSAMPLE): a dpr-1
+// projector still gets ≥2× supersampling on the dense grid flanks, while a retina
+// laptop stops shading 4× the pixels it can display. Capped at DESKTOP × RENDER_SUPERSAMPLE
+// (the old fixed buffer) so a huge/hi-dpi viewport can't push the cost back up.
 function fitCanvas() {
   const s = Math.min(window.innerWidth / DESKTOP_W, window.innerHeight / DESKTOP_H);
   gl.style.width = DESKTOP_W * s + 'px';
   gl.style.height = DESKTOP_H * s + 'px';
+  const ratio = Math.min(RENDER_SUPERSAMPLE, s * Math.max(devicePixelRatio, RENDER_SUPERSAMPLE));
+  if (ratio !== renderer.getPixelRatio()) renderer.setPixelRatio(ratio); // calls setSize(…, false) internally — CSS untouched
+  invalidate();
 }
 fitCanvas();
 window.addEventListener('resize', fitCanvas);
@@ -413,7 +426,7 @@ await Promise.all(sources.map(async (canvas, i) => {
 }));
 
 // ── Interaction ───────────────────────────────────────────
-const windowsApi = initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand });
+const windowsApi = initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand, invalidate });
 
 // Window Morph (demo): "0" toggles morph on the FRONTMOST window (highest z = last
 // clicked/dragged). Toggle in the center for a static morph, or drag toward a flank to
@@ -427,6 +440,7 @@ window.addEventListener('keydown', (e) => {
   const front = windowMeshes.reduce((a, b) => (b.mesh.position.z > a.mesh.position.z ? b : a));
   const cur = front.mesh.material.userData.pendingWarpBlend ?? 0;
   setWarpBlend(front.mesh, cur > 0 ? 0 : 1);
+  invalidate();
 });
 
 // "4" resets every window to its original position/scale/morph/visibility so the demo
@@ -441,10 +455,28 @@ window.addEventListener('keydown', (e) => {
     setWarpBlend(win.mesh, 0);
   }
   windowsApi.resetStack(); // restore stack order so the next click doesn't reshuffle z
+  invalidate();
 });
 
-// ── Render loop ───────────────────────────────────────────
+// ── Render loop — renders only when something changed ─────
+// Two dirty signals: (a) needsRender, set by invalidate() from every transform /
+// uniform / visibility mutation in main.js and windows.js; (b) HTMLTexture repaints —
+// Chrome's onpaint sets texture.needsUpdate (a setter that bumps texture.version), so
+// polling version catches every repaint, whether from an explicit requestPaint() or
+// Chrome-initiated (scroll, CSS transitions, image loads). An idle desktop does zero
+// GPU work, which also keeps a fanless laptop from thermally throttling the frames
+// that matter during interaction.
+const liveTextures = [chrome.material.map, menubarMesh.material.map, ...windowMeshes.map((w) => w.mesh.material.map)];
+const texVersions = liveTextures.map(() => -1);
+
 (function animate() {
   requestAnimationFrame(animate);
+  let dirty = needsRender;
+  for (let i = 0; i < liveTextures.length; i++) {
+    const v = liveTextures[i].version;
+    if (v !== texVersions[i]) { texVersions[i] = v; dirty = true; }
+  }
+  if (!dirty) return;
+  needsRender = false;
   renderer.render(scene, camera);
 })();

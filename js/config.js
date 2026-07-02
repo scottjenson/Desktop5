@@ -15,11 +15,11 @@ export const FOV      = 45;
 export const CAMERA_Z = 6;
 export const Z_STEP   = 0.01; // world-z gap between stacked / focused windows
 
-// Render supersample. The WebGL draw buffer = DESKTOP size × this factor, fixed and
-// DELIBERATELY decoupled from the display's devicePixelRatio: projectors report dpr 1
-// and would otherwise quarter the buffer, under-resolving the dense grid flanks. We
-// render large and let CSS downscale (supersampling) so quality is projector-proof.
-// Bump to 2.5–3 for more crispness if the GPU holds 60fps; drop to 1.5 if it stutters.
+// Render supersample: minimum device-px density AND buffer cap. fitCanvas() sizes the
+// draw buffer to displayed CSS px × max(devicePixelRatio, this) — so a dpr-1 projector
+// still gets ≥2× supersampling on the dense grid flanks, while a retina laptop renders
+// its native pixel count instead of a fixed DESKTOP×2 (which was 4× what it could show).
+// Total buffer is capped at DESKTOP size × this factor (the old fixed-buffer ceiling).
 export const RENDER_SUPERSAMPLE = 2;
 
 // Dynamic drag-shrink: a central plateau stays full-size; a window shrinks
