@@ -596,6 +596,29 @@ await Promise.all(sources.map(async (canvas, i) => {
   scene.add(mesh);
 }));
 
+// ── Clone pass ("d" key, windows.js) ──────────────────────
+// One texture, two meshes: each window gets a hidden twin sharing its HTMLTexture,
+// so the desktop can double to 10 windows (the Exposé-clutter contrast) with no
+// second DOM, no extra rasterization. Plain MeshBasicMaterial — clones never morph.
+// The spread shares every cached ref (scrollEl, hit rects, canvas) with the sibling,
+// so scroll/click routing on a clone drives the same DOM and updates both meshes.
+// cloneOffset (desktop px, +y down) staggers each twin so doubling reads as natural
+// clutter rather than a mirror; applied from the sibling's live position on toggle.
+const CLONE_OFFSETS = [[220, 140], [-260, 110], [240, -130], [-210, -150], [190, 160]];
+windowMeshes.slice().forEach((orig, i) => {
+  const mat = new THREE.MeshBasicMaterial({ map: orig.mesh.material.map, transparent: true, alphaTest: 0.5 });
+  const twin = new THREE.Mesh(orig.mesh.geometry, mat);
+  twin.frustumCulled = false;
+  twin.visible = false;
+  const off = CLONE_OFFSETS[i % CLONE_OFFSETS.length];
+  twin.position.set(orig.home.x + off[0] * S, orig.home.y - off[1] * S, orig.home.z);
+  windowMeshes.push({
+    ...orig, id: orig.id + '-b', mesh: twin, cloneOf: orig, cloneOffset: off,
+    home: { x: twin.position.x, y: twin.position.y, z: twin.position.z, visible: false },
+  });
+  scene.add(twin);
+});
+
 // ── Interaction ───────────────────────────────────────────
 const windowsApi = initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand, invalidate });
 
@@ -635,7 +658,7 @@ window.addEventListener('keydown', (e) => {
   for (const win of windowMeshes) {
     win.mesh.position.set(win.home.x, win.home.y, win.home.z);
     win.mesh.scale.set(1, 1, 1);
-    win.mesh.visible = true;
+    win.mesh.visible = win.home.visible ?? true; // clones reset to hidden — back to the original 5
     setWarpBlend(win.mesh, 0);
     setMorphMode(win.mesh, 0);
   }

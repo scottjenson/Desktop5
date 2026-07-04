@@ -261,7 +261,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   gl.addEventListener('mousedown', (e) => {
     toNdc(e);
     raycaster.setFromCamera(ndc, camera);
-    const hits = raycaster.intersectObjects(meshes, false);
+    // Raycaster does NOT skip invisible meshes — without this filter the hidden
+    // window clones ("d" key) would steal clicks from the windows behind them.
+    const hits = raycaster.intersectObjects(meshes, false).filter((h) => h.object.visible);
     if (!hits.length) return;
 
     const mesh = hits[0].object;
@@ -577,6 +579,32 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     exposeSaved = null;
   });
 
+  // ── Doubling (toggle "d") ─────────────────────────────────
+  // Shows/hides the window clones built in main.js, doubling the desktop to 10
+  // windows so Exposé ("e") demonstrates its clutter problem. On show, each clone
+  // lands at its sibling's CURRENT position plus its stagger offset (clamped), at
+  // full size. Blocked while Exposé is held — the packed set must not change mid-peek.
+  let doubled = false;
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'd' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (exposeSaved) return;
+    doubled = !doubled;
+    for (const w of windowMeshes) {
+      if (!w.cloneOf) continue;
+      if (doubled) {
+        const sib = worldToCenter(w.cloneOf.mesh.position.x, w.cloneOf.mesh.position.y);
+        const cx = Math.min(Math.max(sib.cx + w.cloneOffset[0], w.w / 2), DESKTOP_W - w.w / 2);
+        const cy = Math.min(Math.max(sib.cy + w.cloneOffset[1], MENUBAR_H + w.h / 2), DESKTOP_H - DOCK_CLEARANCE - w.h / 2);
+        const p = centerToWorld(cx, cy);
+        w.mesh.position.x = p.x;
+        w.mesh.position.y = p.y;
+        w.mesh.scale.set(1, 1, 1);
+      }
+      w.mesh.visible = doubled;
+    }
+    invalidate();
+  });
+
   // "1" key: toggle menubar centering + pill shape, driving repaints for CSS transitions.
   const menuLeft  = document.getElementById('menu-left');
   const menuRight = document.querySelector('#menubar .menu-right');
@@ -640,10 +668,17 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   // switching to Demo 3 (whose word-processor window is too different to morph to),
   // so the tab switch reveals a "new window" on an otherwise-matching empty desktop.
   let windowsHidden = false;
+  let hiddenSnapshot = null; // meshes visible at hide time — unhide must not reveal clones
   window.addEventListener('keydown', (e) => {
     if (e.key === '3') {
       windowsHidden = !windowsHidden;
-      meshes.forEach((m) => { m.visible = !windowsHidden; });
+      if (windowsHidden) {
+        hiddenSnapshot = meshes.filter((m) => m.visible);
+        meshes.forEach((m) => { m.visible = false; });
+      } else {
+        (hiddenSnapshot ?? meshes).forEach((m) => { m.visible = true; });
+        hiddenSnapshot = null;
+      }
       invalidate();
     }
   });
@@ -726,6 +761,8 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     anims.length = 0;   // drop any running park/restore lerps
     drag = null;        // abandon an in-progress drag
     exposeSaved = null; // a held "e" must not restore pre-reset transforms on keyup
+    doubled = false;    // main.js just hid the clones (home.visible) — keep "d" in step
+    windowsHidden = false; hiddenSnapshot = null; // ditto for the "3" hide-all toggle
     stack.length = 0;
     stack.push(...windowMeshes);
     restack();
