@@ -131,6 +131,7 @@ Sluggish on a fanless laptop with the original setup: a fixed 3440×1440×2 buff
 | `2` | windows.js | Reveal / animate the grid. |
 | `3` | windows.js | Toggle all window meshes' `.visible` — clears the desktop before tab-switching to Demo 3. |
 | `4` | main.js | Reset every window to original position/scale/morph/visibility (windows only — menubar & grid untouched). Cancels in-flight animations/drag and restores stack order via `windowsApi.resetStack()`. |
+| `E` (hold) | windows.js | **Exposé** contrast demo: while held, all visible windows pack into ≈√n centered rows (5 → 3+2) at one uniform, area-derived scale (non-overlapping; tunables `EXPOSE_*` in config.js); release restores the saved transforms. Quasimode — state lives only for the hold, and `resetStack()` clears it. |
 
 **Next — in-window interactivity (Phase B):** map raycaster `uv` → window-local px → `document.elementFromPoint` → dispatch synthetic click/hover so buttons, tabs, and hover states work. This is also the enabler for file-level dragging.
 

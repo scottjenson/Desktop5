@@ -73,6 +73,14 @@ export const WINDOW_SUPERSAMPLE = 1;
 export const MORPH_SEGMENTS_X = 40; // horizontal segments — enough to bend smoothly across the warp boundary
 export const MORPH_FADE_MS    = 220; // u_warpBlend 0↔1 animation on toggle
 
+// Exposé (hold "e"): pack all visible windows, non-overlapping, into ≈√n centered rows
+// — the classic-Mac contrast demo. One uniform scale for every window (that's what
+// makes it read as Exposé), derived from area so the cluster stays tight on the ultrawide.
+export const EXPOSE_BOX_FRAC  = 0.65; // fraction of desktop width the cluster may occupy
+export const EXPOSE_GAP_PX    = 40;   // spacing between windows (and between rows)
+export const EXPOSE_MAX_SCALE = 0.6;  // scale ceiling so no window looks near-full-size
+export const EXPOSE_FILL      = 0.55; // target fraction of the box area the windows fill
+
 // Music compact mode: when the music window shrinks past this scale (≈ parking at the
 // edge), swap to a stripped-down layout with one giant Play/Pause button. The button
 // size is shared by the JS hit-rect and the CSS (#win-music.compact .music-play-btn),

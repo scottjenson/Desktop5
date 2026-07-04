@@ -8,6 +8,7 @@ import {
   SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
   HIGHLIGHT_FADE_IN_MS, HIGHLIGHT_FADE_OUT_MS,
   MUSIC_COMPACT_SCALE, MUSIC_COMPACT_BTN_PX,
+  EXPOSE_BOX_FRAC, EXPOSE_GAP_PX, EXPOSE_MAX_SCALE, EXPOSE_FILL,
 } from './config.js';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -501,6 +502,81 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
   }
 
+  // ── Exposé (hold "e") ─────────────────────────────────────
+  // Quasimode: keydown saves every visible window's transform and spreads them
+  // non-overlapping at one uniform scale; keyup restores. The saved state lives only
+  // for the duration of the hold (Learning #8's statelessness is about the stash
+  // gesture; a held peek is inherently save-and-restore).
+  let exposeSaved = null;
+
+  // Pack all visible windows into a box centered on the desktop, in ≈√n rows of
+  // near-equal count (5 windows → 3+2, the classic Exposé cluster). Uniform scale from
+  // total area (Exposé look); each row is centered, the row block is centered
+  // vertically. Row count is TARGETED rather than wrapped-on-overflow — at demo sizes
+  // every window fits one row, so width-wrapping alone never stacked vertically. If a
+  // row overflows the box width or the block overflows the height, shrink and repack —
+  // sizes decay geometrically, so this always terminates.
+  function exposeSlots() {
+    const wins = stack
+      .filter((w) => w.mesh.visible)
+      .map((w) => ({ w, ...worldToCenter(w.mesh.position.x, w.mesh.position.y) }))
+      .sort((a, b) => (a.cy - b.cy) || (a.cx - b.cx)); // reading order ≈ nearest slot
+    if (!wins.length) return [];
+
+    const boxW = DESKTOP_W * EXPOSE_BOX_FRAC;
+    const boxH = DESKTOP_H - MENUBAR_H - DOCK_CLEARANCE;
+    const totalArea = wins.reduce((sum, { w }) => sum + w.w * w.h, 0);
+    let s = Math.min(EXPOSE_MAX_SCALE, Math.sqrt((EXPOSE_FILL * boxW * boxH) / totalArea));
+
+    const nRows = Math.max(1, Math.round(Math.sqrt(wins.length)));
+    const perRow = Math.ceil(wins.length / nRows);
+    const rows = [];
+    for (let i = 0; i < wins.length; i += perRow) rows.push(wins.slice(i, i + perRow));
+
+    for (;;) {
+      const widest = Math.max(...rows.map(
+        (r) => r.reduce((sum, i) => sum + i.w.w * s, 0) + EXPOSE_GAP_PX * (r.length - 1)));
+      if (widest > boxW) { s *= 0.9; continue; }
+
+      const rowH = rows.map((r) => Math.max(...r.map((i) => i.w.h * s)));
+      const totalH = rowH.reduce((a, b) => a + b, 0) + EXPOSE_GAP_PX * (rows.length - 1);
+      if (totalH > boxH) { s *= 0.9; continue; }
+
+      const slots = [];
+      let y = MENUBAR_H + (boxH - totalH) / 2;
+      rows.forEach((r, ri) => {
+        const rowWidth = r.reduce((sum, i) => sum + i.w.w * s, 0) + EXPOSE_GAP_PX * (r.length - 1);
+        let x = (DESKTOP_W - rowWidth) / 2;
+        for (const i of r) {
+          slots.push({ w: i.w, cx: x + (i.w.w * s) / 2, cy: y + rowH[ri] / 2, scale: s });
+          x += i.w.w * s + EXPOSE_GAP_PX;
+        }
+        y += rowH[ri] + EXPOSE_GAP_PX;
+      });
+      return slots;
+    }
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'e' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (exposeSaved || drag) return;
+    const slots = exposeSlots();
+    if (!slots.length) return;
+    exposeSaved = slots.map(({ w }) => ({
+      mesh: w.mesh, x: w.mesh.position.x, y: w.mesh.position.y, scale: w.mesh.scale.x,
+    }));
+    for (const { w, cx, cy, scale } of slots) {
+      const p = centerToWorld(cx, cy);
+      animateTo(w.mesh, p.x, p.y, scale);
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() !== 'e' || !exposeSaved) return;
+    for (const saved of exposeSaved) animateTo(saved.mesh, saved.x, saved.y, saved.scale);
+    exposeSaved = null;
+  });
+
   // "1" key: toggle menubar centering + pill shape, driving repaints for CSS transitions.
   const menuLeft  = document.getElementById('menu-left');
   const menuRight = document.querySelector('#menubar .menu-right');
@@ -647,8 +723,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   // Also cancels any in-flight mesh animations + active drag so they don't clobber the
   // home positions main.js just set.
   function resetStack() {
-    anims.length = 0; // drop any running park/restore lerps
-    drag = null;      // abandon an in-progress drag
+    anims.length = 0;   // drop any running park/restore lerps
+    drag = null;        // abandon an in-progress drag
+    exposeSaved = null; // a held "e" must not restore pre-reset transforms on keyup
     stack.length = 0;
     stack.push(...windowMeshes);
     restack();
