@@ -1,8 +1,56 @@
 # Terraced Warp — zoom shelves instead of a smooth funnel
 
-## Status: PROPOSED (2026-07-05). No code. Prototype next; nothing here is committed
-design. Read alongside `plans/morph-readability.md` (the distortion diagnosis this
-builds on) and `plans/grid.md` (the curve's current implementation sites).
+## Status: TESTED AND PARKED (2026-07-05). Phases 0–2 were fully built and verified
+behind a "g" key toggle, then REVERTED from the working tree — the full
+implementation is preserved BYTE-EXACT in **`plans/terraced-warp.patch`** (408
+lines, touches js/config.js, js/main.js, js/windows.js, CLAUDE.md).
+
+**To resurrect:** `git apply plans/terraced-warp.patch` from the repo root, then
+press 2 (boot grid), g (terraced), 0 (morph). If the code has drifted and the patch
+no longer applies, everything needed to rebuild is recorded below and in the
+implementation notes at the end of this doc.
+
+**Scott's verdicts (2026-07-05):**
+* Phase 0/1 (grid look + drag detents): "looks reasonable, I can see how it works."
+* Phase 2 (morph on shelves): "programmed properly" but "visually it's still a bit
+  odd" — NOT the readability payoff hoped for. The theory (uniform mini window on an
+  orthogonal shelf) held mathematically; the perception didn't follow.
+* Dealbreaker for keeping it as a dormant background demo: **page-load stall** (next
+  section).
+
+### ⚠️ Load-time learning (applies to ANY future morph-shader work, not just this)
+The Phase 2 shaders caused a noticeable hard-reload stall. Cause is NOT JavaScript:
+the morph vertex shader calls `newtonInverse` at FIVE sites (vertex + 2 edges +
+2 hinges); GPU compilers fully unroll its 6-iteration loop, and with the piecewise
+terraced functions (two 5-branch if-chains) embedded in every unrolled iteration,
+ANGLE's GLSL→Metal translation blows up — one long synchronous compile at first
+render. Any revisit MUST include:
+1. **Move the per-window solves (xsL/xsR/xsHL/xsHR) from the vertex shader to JS
+   uniforms** — they're constant across a window's vertices (functions of
+   modelMatrix only, which JS knows; update on move + invalidate). Cuts Newton call
+   sites 5 → 1. Helps the CUBIC shader too — worth doing independently.
+2. `renderer.compileAsync` at startup (parallel shader compile — page paints
+   immediately).
+3. Don't inject `newtonInverse` into the FRAGMENT prelude (it only needs
+   forwardAt/localScaleAt).
+
+### Implementation facts worth keeping (validated, in the patch)
+* One curve seam: ALL morph math flows through gAt / localScaleAt / forwardAt /
+  newtonInverse (`_curveGlsl` in main.js; `terracedMode` branch in windows.js) — the
+  fold/mode logic is curve-agnostic. The GLSL is GENERATED from the config
+  breakpoint arrays (`TERRACE_F/S`) so JS and shader cannot drift.
+* Newton round-trip validated: 1.7e-12 desktop-px terraced, 8.4e-3 cubic at the
+  extreme logical edge (6 iterations; cubic previously used 4).
+* **Beyond-bezel trap:** morphed-drag overscroll evaluates the curve at flankDist
+  > 1, where extrapolating the last smoothstep segment goes NEGATIVE and breaks
+  Newton — both twins must extend linearly at the bezel's g.
+* The morphed-drag overscroll clamp generalizes to both curves as
+  `(DESKTOP_W/2)·(1 + warpForward(1)) − halfW`.
+* Stash columns landed on the shelves by construction (0.550 / 0.220 exactly at
+  cx 620 / 285) — fresh shakes parked coherently with zero column changes.
+
+Read alongside `plans/morph-readability.md` (the distortion diagnosis this builds
+on) and `plans/grid.md` (the curve's implementation sites).
 
 ## The problem this dissolves
 

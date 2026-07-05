@@ -8,11 +8,14 @@ The product is a web prototype that renders standard HTML/CSS application window
 * `plans/grid.md` — the desktop background "UX tension grid" shader (anamorphic warp, glow lines) and the **Drag Rails** feature (built). Read before touching the background shader or window-drag feedback.
 * `plans/vertex-warp-experiment.md` — a PAUSED experiment (windows physically deforming to follow the grid). Read before any "warp the window mesh" idea — explains why it was abandoned (unreadable content).
 * `plans/morph-readability.md` — the ACTIVE plan to improve the morph's legibility (per-pixel fragment warp, shape variants, rigid-ink mode). Read before touching `morphMaterial` or the "0" demo key; contains hard constraints and non-obvious discoveries (closed-form fragment mapping, three.js mipmap block, chord-trapezoid).
-* `plans/terraced-warp.md` — a PROPOSED redesign of the warp curve: flat zoom
-  shelves (where parked windows are uniformly mini and readable) joined by short
-  steep transitions, replacing the smooth cubic. Read before any change to the
-  warp curve, `WARP_*` dials, or stash-column geometry — it explains the
-  value-vs-slope coupling that motivates it.
+* `plans/terraced-warp.md` — a TESTED-AND-PARKED redesign of the warp curve: flat
+  zoom shelves joined by short steep transitions, replacing the smooth cubic. Built
+  through the morph (Phases 0–2), judged "visually a bit odd", and reverted; the
+  full implementation survives byte-exact in `plans/terraced-warp.patch`
+  (`git apply` to resurrect). Read before any change to the warp curve, `WARP_*`
+  dials, stash-column geometry, or morph-shader size — it records the
+  value-vs-slope coupling AND a shader-compile load-time trap (unrolled Newton ×
+  piecewise branches) that applies to any morph work.
 * `plans/CODE_REVIEW.md` — a dated, point-in-time review of the prototype.
 
 ---

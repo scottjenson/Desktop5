@@ -1,0 +1,408 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 489c0bc..8bde4f6 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -137,6 +137,7 @@ Sluggish on a fanless laptop with the original setup: a fixed 3440×1440×2 buff
+ | `3` | windows.js | Toggle all window meshes' `.visible` — clears the desktop before tab-switching to Demo 3. |
+ | `4` | main.js | Reset every window to original position/scale/morph/visibility (windows only — menubar & grid untouched). Cancels in-flight animations/drag and restores stack order via `windowsApi.resetStack()`. |
+ | `E` (hold) | windows.js | **Exposé** contrast demo: while held, all visible windows pack into ≈√n centered rows (5 → 3+2, 10 → 4+4+2) at one uniform, area-derived scale (non-overlapping; tunables `EXPOSE_*` in config.js); release restores the saved transforms. Quasimode — state lives only for the hold, and `resetStack()` clears it. |
++| `G` | windows.js | Toggle the **terraced warp** prototype (plans/terraced-warp.md, Phases 0–2): swaps grid shader, JS curve functions (drag-shrink, drag rails, stash-column scales, morphed-drag mapping), AND the morph shaders between the cubic and the shelf profile in lockstep — all through one curve seam (`_curveGlsl` in main.js / `terracedMode` branch in windows.js). Logs the mode. Windows parked under one curve keep their scale until re-parked. |
+ | `D` | windows.js | Toggle window **doubling**: shows/hides a hidden clone of each window (built in main.js — one shared `HTMLTexture`, two meshes, no extra DOM/rasterization) so Exposé demonstrates clutter at 10 windows. Clones land at the sibling's current position + a stagger offset, are fully interactive (drag/scroll/focus route to the shared DOM), and never morph. `4` resets to the original 5 (clones' `home.visible=false`). Blocked while `E` is held. |
+ 
+ **Next — in-window interactivity (Phase B):** map raycaster `uv` → window-local px → `document.elementFromPoint` → dispatch synthetic click/hover so buttons, tabs, and hover states work. This is also the enabler for file-level dragging.
+diff --git a/js/config.js b/js/config.js
+index f1884b4..847ab20 100644
+--- a/js/config.js
++++ b/js/config.js
+@@ -45,6 +45,16 @@ export const STASH_OUTER_CX = 285; // overflow parks here (smaller)
+ export const WARP_DEADZONE   = 0.5;  // |x| (normalized -1..1): center 50% (1720px) stays orthogonal; 25% flanks warp
+ export const WARP_POWER      = 3.0;  // cubic: w''(0)=0 → C²-smooth bend at the dead-zone boundary (no kink)
+ export const WARP_STRENGTH   = 1.33; // compensates the cubic so edge localScale ≈ 1/9 (3·1.33·2·innerDeriv ≈ 8)
++// ── Terraced warp PROTOTYPE (plans/terraced-warp.md; toggled live with the "g" key) ──
++// Alternative curve: flat zoom shelves joined by short smoothstep transitions, replacing
++// the cubic. Breakpoints in flankDist units (0 = plateau boundary at 860px, 1 = bezel;
++// f = px-from-plateau / 860). Equal adjacent scales = a shelf. Segments (left flank px):
++// transition 860→790 | SHELF 790→400 @0.55 (inner column) | transition 400→300 |
++// SHELF 300→120 @0.22 (outer column) | dip 120→0 → 0.15 (≈icon scale at the bezel).
++// The GLSL twins in main.js are GENERATED from these arrays — single source of truth.
++export const TERRACE_F = [0, 70 / 860, 460 / 860, 560 / 860, 740 / 860, 1];
++export const TERRACE_S = [1, 0.55, 0.55, 0.22, 0.22, 0.15];
++
+ export const SNAP_ZONE_STEP    = 100;  // px of horizontal movement to trigger edge zone highlight
+ export const SHAKE_MIN_TRAVEL  = 20;   // min px between reversals to count (filters jitter)
+ export const SHAKE_WINDOW_MS   = 500;  // rolling time window for reversal timestamps
+diff --git a/js/main.js b/js/main.js
+index 74d5153..2f8a91c 100644
+--- a/js/main.js
++++ b/js/main.js
+@@ -7,7 +7,7 @@
+ // own source canvas to get an independent, live-updating texture.
+ 
+ import * as THREE from 'three';
+-import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, WINDOW_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_EDGE_FADE_FLOOR, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X } from './config.js';
++import { DESKTOP_W, DESKTOP_H, FOV, CAMERA_Z, Z_STEP, MENUBAR_H, DOCK_CLEARANCE, GRID_CELL_PX, WARP_DEADZONE, WARP_POWER, WARP_STRENGTH, RENDER_SUPERSAMPLE, WINDOW_SUPERSAMPLE, GRID_LINE_CORE_PX, GRID_LINE_GLOW_PX, GRID_GLOW_STRENGTH, GRID_EDGE_FADE_START, GRID_EDGE_FADE_FLOOR, GRID_INTENSITY, HIGHLIGHT_GAIN, HIGHLIGHT_THICKNESS, MORPH_SEGMENTS_X, TERRACE_F, TERRACE_S } from './config.js';
+ import { initWindows } from './windows.js';
+ 
+ // ── CSS custom properties (derived from config.js) ────────
+@@ -78,6 +78,69 @@ const _vertSrc = /* glsl */`
+   }
+ `;
+ 
++// ── Terraced warp PROTOTYPE (plans/terraced-warp.md; "g" key) ─────────────
++// GLSL for the terraced curve is GENERATED from the config breakpoint arrays so the
++// shader and windows.js can never drift. terrG(f) = 1/scale (the compression factor,
++// smoothstep-ramped between shelves); terrInt(f) = ∫₀ᶠ terrG — the closed-form
++// forward warp (∫smoothstep is a quartic; each transition contributes W·(a+b)/2).
++// Scalar if-chains, not arrays: GLSL ES 1.00 has no const array constructors.
++// Beyond the bezel (f > 1, reached by the morph Newton solver during logical
++// overscroll) both functions extend LINEARLY at the bezel's g — extrapolating the
++// last smoothstep segment would go negative and break Newton.
++function terracedGlsl() {
++  const F = TERRACE_F, G = TERRACE_S.map((s) => 1 / s);
++  const L = [0]; // cumulative ∫g at each breakpoint
++  for (let i = 0; i < F.length - 1; i++) L.push(L[i] + (F[i + 1] - F[i]) * (G[i] + G[i + 1]) / 2);
++  const seg = (i, body) => {
++    const W = F[i + 1] - F[i];
++    return `    if (f < ${F[i + 1].toFixed(6)}) { float t = (f - ${F[i].toFixed(6)}) / ${W.toFixed(6)}; ${body(i, W)} }\n`;
++  };
++  const gEnd = G[G.length - 1].toFixed(6), lEnd = L[L.length - 1].toFixed(6);
++  let src = 'float terrG(float f) {\n';
++  for (let i = 0; i < F.length - 1; i++) src += seg(i, (i) =>
++    `float sm = t * t * (3.0 - 2.0 * t); return ${G[i].toFixed(6)} + ${(G[i + 1] - G[i]).toFixed(6)} * sm;`);
++  src += `    return ${gEnd};\n}\nfloat terrInt(float f) {\n`;
++  for (let i = 0; i < F.length - 1; i++) src += seg(i, (i, W) =>
++    `return ${L[i].toFixed(6)} + ${W.toFixed(6)} * (${G[i].toFixed(6)} * t + ${(G[i + 1] - G[i]).toFixed(6)} * (t * t * t - 0.5 * t * t * t * t));`);
++  src += `    return ${lEnd} + (f - 1.0) * ${gEnd};\n}\n`;
++  return src;
++}
++
++// Shared curve seam for the MORPH shaders (vertex AND fragment): every place the
++// morph math touches the warp goes through these three functions, so the "g" toggle
++// swaps the whole morph between curve families with no change to the fold/mode
++// logic. gAt = 1/scale (the cubic's 1+derivative ≡ terraced terrG); forwardAt =
++// physical→logical; newtonInverse = the reverse. Both curves are smooth, monotone
++// and convex per flank, so Newton from the logical guess converges monotonically —
++// 6 iterations covers the terraced curve's steeper g steps (cubic needed 4).
++const _curveGlsl = /* glsl */`
++      uniform float u_terraced; // 0 = cubic, 1 = terraced prototype ("g" key)
++${terracedGlsl()}
++      float gAt(float xs) {
++        float flankDist = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
++        if (u_terraced > 0.5) return terrG(flankDist);
++        return 1.0 + u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0)) * u_warpStrength / (1.0 - u_warpDeadzone);
++      }
++      float localScaleAt(float xs) { return 1.0 / gAt(xs); }
++      float forwardAt(float xs) {
++        if (u_terraced > 0.5) {
++          float a = abs(xs);
++          if (a <= u_warpDeadzone) return xs;
++          float f = (a - u_warpDeadzone) / (1.0 - u_warpDeadzone);
++          return sign(xs) * (u_warpDeadzone + terrInt(f) * (1.0 - u_warpDeadzone));
++        }
++        float flankDist = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
++        return xs + sign(xs) * pow(flankDist, u_warpPower) * u_warpStrength;
++      }
++      float newtonInverse(float xw) {
++        float xs = xw;
++        for (int i = 0; i < 6; i++) {
++          xs -= (forwardAt(xs) - xw) / gAt(xs);
++        }
++        return xs;
++      }
++`;
++
+ const _fragSrc = /* glsl */`
+   uniform float u_freqX;        // grid cells across full width  (DESKTOP_W / GRID_CELL_PX)
+   uniform float u_freqY;        // grid cells across full height (DESKTOP_H / GRID_CELL_PX)
+@@ -101,8 +164,10 @@ const _fragSrc = /* glsl */`
+   uniform vec2  u_dragBand;         // dragged window's vertical extent in gridYcoord (logical-Y) space: (top, bottom)
+   uniform float u_highlightGain;    // extra brightness on highlighted horizontals
+   uniform float u_highlightThickness; // core/glow width multiplier for highlighted horizontals
++  uniform float u_terraced;         // 0 = cubic curve, 1 = terraced prototype ("g" key)
+   varying vec2 vUv;
+ 
++${terracedGlsl()}
+   void main() {
+     // Normalized screen space, -1..1, centre at 0 (matches windows.js xPos).
+     float centerX = (vUv.x - 0.5) * 2.0;
+@@ -111,16 +176,26 @@ const _fragSrc = /* glsl */`
+     // 0 at the dead-zone boundary, 1 at the screen edge.
+     float flankDist = max(0.0, abs(centerX) - u_deadZone) / (1.0 - u_deadZone);
+ 
+-    // X warp: push the coordinate outward by the power curve (integral of the density).
+-    float warp = pow(flankDist, u_warpPower) * u_warpStrength;
++    // X warp: push the coordinate outward (integral of the density) and derive the
++    // local scale. Two curve families share the boot progress (u_warpStrength 0→max):
++    //   cubic (default): warp = flankDist^power · strength, scale = 1/(1+derivative) —
++    //     identical math to getWindowScale() in windows.js, so window size and grid
++    //     density stay locked.
++    //   terraced ("g" key prototype): warp = (terrInt − f)·(1 − deadZone), scale =
++    //     1/terrG — the same lockstep, via the terraced branch of getWindowScale().
++    float warp; float localScale;
++    if (u_terraced > 0.5) {
++      float prog = u_warpStrength / max(u_warpStrengthMax, 1e-5);
++      warp = (terrInt(flankDist) - flankDist) * (1.0 - u_deadZone) * prog;
++      localScale = 1.0 / mix(1.0, terrG(flankDist), prog);
++    } else {
++      warp = pow(flankDist, u_warpPower) * u_warpStrength;
++      float innerDeriv = 1.0 / (1.0 - u_deadZone);
++      float derivative = u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0)) * u_warpStrength * innerDeriv;
++      localScale = 1.0 / (1.0 + derivative);
++    }
+     float gridXcoord = centerX + sign(centerX) * warp;
+ 
+-    // Local scale = inverse of the warp's analytical derivative. Identical math to
+-    // getWindowScale() in windows.js, so window size and grid density stay locked.
+-    float innerDeriv = 1.0 / (1.0 - u_deadZone);
+-    float derivative = u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0)) * u_warpStrength * innerDeriv;
+-    float localScale = 1.0 / (1.0 + derivative);
+-
+     // Y has no warp, so compress it by 1/localScale to keep cells perfectly square.
+     float gridYcoord = centerY / localScale;
+ 
+@@ -212,6 +287,7 @@ const bgMesh = new THREE.Mesh(
+       u_edgeFadeFloor:{ value: GRID_EDGE_FADE_FLOOR },
+       u_gridIntensity:{ value: GRID_INTENSITY },
+       u_reveal:       { value: 0.0 },
++      u_terraced:     { value: 0.0 }, // terraced-warp prototype toggle ("g" key)
+       u_dragActive:   { value: 0.0 }, // Drag Rails (Phase 3) — 0 until a drag fires
+       u_dragBand:     { value: new THREE.Vector2(0.0, 0.0) }, // (top, bottom) in gridYcoord space
+       u_highlightGain:      { value: HIGHLIGHT_GAIN },
+@@ -259,6 +335,8 @@ function morphMaterial(el, geomHalfW, geomHalfH) {
+     // Shape variant, toggled by the "-" key (plans/morph-readability.md):
+     // 0 faithful (curved) · 1 creased centered-Y (readable fold)
+     shader.uniforms.u_morphMode    = { value: mat.userData.pendingMorphMode ?? 0.0 };
++    // Curve family ("g" key, plans/terraced-warp.md) — pending pattern like the two above.
++    shader.uniforms.u_terraced     = { value: mat.userData.pendingTerraced ?? 0.0 };
+ 
+     shader.vertexShader = `
+       uniform float u_halfPlaneW;
+@@ -276,23 +354,10 @@ function morphMaterial(el, geomHalfW, geomHalfH) {
+       varying vec4 v_foldX;  // physical x of the same four points
+       varying vec4 v_foldS;  // grid localScale at the same four points
+ 
+-      // Same math as the original inline Newton block, factored into functions so
+-      // the shape variants can also solve the WINDOW EDGES (chord/rect modes need
+-      // the edge positions to straighten between grid-locked corners).
+-      float warpDerivAt(float xs) {
+-        float flankDist = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+-        return u_warpPower * pow(flankDist, max(0.0, u_warpPower - 1.0)) * u_warpStrength / (1.0 - u_warpDeadzone);
+-      }
+-      float localScaleAt(float xs) { return 1.0 / (1.0 + warpDerivAt(xs)); }
+-      float newtonInverse(float xw) {
+-        float xs = xw; // initial guess; smooth monotonic f → sub-pixel in 4 iters
+-        for (int i = 0; i < 4; i++) {
+-          float flankDist = max(0.0, abs(xs) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+-          float warp = sign(xs) * pow(flankDist, u_warpPower) * u_warpStrength;
+-          xs -= ((xs + warp) - xw) / (1.0 + warpDerivAt(xs));
+-        }
+-        return xs;
+-      }
++      // Curve-family seam (localScaleAt / forwardAt / newtonInverse) — shared with
++      // the fragment shader, branches cubic ↔ terraced on u_terraced. The fold/mode
++      // logic below only ever calls these, so it is curve-agnostic.
++${_curveGlsl}
+     ` + shader.vertexShader;
+ 
+     // Replace the standard projection with our warped one. <project_vertex> normally does:
+@@ -397,17 +462,16 @@ function morphMaterial(el, geomHalfW, geomHalfH) {
+       varying vec4 v_foldW;
+       varying vec4 v_foldX;
+       varying vec4 v_foldS;
++${_curveGlsl}
+     ` + shader.fragmentShader;
+ 
+     shader.fragmentShader = shader.fragmentShader.replace(
+       '#include <map_fragment>',
+       /* glsl */`
+         #ifdef USE_MAP
+-          float xs_f    = v_phys.x / u_halfPlaneW;
+-          float flank_f = max(0.0, abs(xs_f) - u_warpDeadzone) / (1.0 - u_warpDeadzone);
+-          float xw_f    = xs_f + sign(xs_f) * pow(flank_f, u_warpPower) * u_warpStrength;
+-          float deriv_f = u_warpPower * pow(flank_f, max(0.0, u_warpPower - 1.0)) * u_warpStrength / (1.0 - u_warpDeadzone);
+-          float ls_f    = 1.0 / (1.0 + deriv_f);
++          float xs_f = v_phys.x / u_halfPlaneW;
++          float xw_f = forwardAt(xs_f);       // closed-form forward, both curve families
++          float ls_f = localScaleAt(xs_f);
+           float uW = (xw_f - v_winExt.x) / max(v_winExt.y - v_winExt.x, 1e-6);
+           // Y: undo the vertex Y-pull at this fragment's x (same blend as the pull).
+           float vW = (v_phys.y / mix(1.0, ls_f, u_warpBlend) - v_winExt.z) / max(v_winExt.w, 1e-6) + 0.5;
+@@ -619,8 +683,22 @@ windowMeshes.slice().forEach((orig, i) => {
+   scene.add(twin);
+ });
+ 
++// Curve-family switch ("g" key handler in windows.js calls this): flips the grid
++// shader AND every window's morph material in one step, so grid, drag physics, and
++// morph can never disagree. Clones have plain materials — the userData write is
++// harmless and the shader check skips them.
++function setTerracedCurve(on) {
++  const v = on ? 1.0 : 0.0;
++  bgMesh.material.uniforms.u_terraced.value = v;
++  for (const { mesh } of windowMeshes) {
++    const mat = mesh.material;
++    mat.userData.pendingTerraced = v;
++    if (mat.userData.shader) mat.userData.shader.uniforms.u_terraced.value = v;
++  }
++}
++
+ // ── Interaction ───────────────────────────────────────────
+-const windowsApi = initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand, invalidate });
++const windowsApi = initWindows({ gl, camera, windowMeshes, S, chromeSrc: document.getElementById('src-chrome'), menubarSrc, revealUniform: bgMesh.material.uniforms.u_reveal, warpUniform: bgMesh.material.uniforms.u_warpStrength, dragActiveUniform: bgMesh.material.uniforms.u_dragActive, dragBandUniform: bgMesh.material.uniforms.u_dragBand, setTerraced: setTerracedCurve, invalidate });
+ 
+ // Window Morph (demo): "0" toggles morph on the FRONTMOST window (highest z = last
+ // clicked/dragged). Toggle in the center for a static morph, or drag toward a flank to
+diff --git a/js/windows.js b/js/windows.js
+index 86e66ec..330b4af 100644
+--- a/js/windows.js
++++ b/js/windows.js
+@@ -4,6 +4,7 @@ import * as THREE from 'three';
+ import {
+   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
+   SHRUNK_PX, SNAP_ZONE_STEP, MIN_SCALE, STASH_INNER_CX, STASH_OUTER_CX,
++  TERRACE_F, TERRACE_S,
+   WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
+   SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
+   HIGHLIGHT_FADE_IN_MS, HIGHLIGHT_FADE_OUT_MS,
+@@ -13,14 +14,55 @@ import {
+ 
+ // ── Helpers ───────────────────────────────────────────────
+ 
++// ── Terraced warp PROTOTYPE (plans/terraced-warp.md; "g" key toggles) ──
++// JS twin of the generated GLSL in main.js: scale = 1/terrG(f), smoothstep-ramped
++// between shelf breakpoints; terracedInt = ∫terrG, the closed-form forward warp.
++// No MIN_SCALE floor — the curve bottoms at its dip target (≈0.15) by design.
++// Beyond the bezel (f > 1, reached during morphed-drag logical overscroll) both
++// extend linearly at the bezel's g, matching the GLSL. Fully ported (Phase 2):
++// grid, drag physics, AND morph shaders all branch on the same toggle.
++let terracedMode = false;
++
++const TERR_G = TERRACE_S.map((s) => 1 / s);
++const TERR_L = [0]; // cumulative ∫g at each breakpoint (mirrors terracedGlsl())
++for (let i = 0; i < TERRACE_F.length - 1; i++) {
++  TERR_L.push(TERR_L[i] + (TERRACE_F[i + 1] - TERRACE_F[i]) * (TERR_G[i] + TERR_G[i + 1]) / 2);
++}
++
++function terrSegment(f) {
++  for (let k = 0; k < TERRACE_F.length - 1; k++) {
++    if (f < TERRACE_F[k + 1]) return k;
++  }
++  return TERRACE_F.length - 2;
++}
++
++function terracedScale(flankDist) {
++  const f = Math.min(Math.max(flankDist, 0), 1);
++  const i = terrSegment(f);
++  const t = (f - TERRACE_F[i]) / (TERRACE_F[i + 1] - TERRACE_F[i]);
++  const sm = t * t * (3 - 2 * t);
++  return 1 / (TERR_G[i] + (TERR_G[i + 1] - TERR_G[i]) * sm);
++}
++
++function terracedInt(flankDist) {
++  const f = Math.max(flankDist, 0);
++  const last = TERRACE_F.length - 1;
++  if (f >= 1) return TERR_L[last] + (f - 1) * TERR_G[last]; // linear extension past the bezel
++  const i = terrSegment(f);
++  const W = TERRACE_F[i + 1] - TERRACE_F[i];
++  const t = (f - TERRACE_F[i]) / W;
++  return TERR_L[i] + W * (TERR_G[i] * t + (TERR_G[i + 1] - TERR_G[i]) * (t * t * t - 0.5 * t * t * t * t));
++}
++
+ // Window scale as a function of normalized horizontal position (xPos ∈ -1..1, 0 = centre).
+ // This is the exact analytical derivative of the background grid's warp curve
+ // (gridX = x + sign(x)·flankDist^power·strength): the window shrinks at precisely the
+ // rate the grid compresses. Dials live in config.js and are shared with the shader,
+ // so the two physics can never drift. Width-independent — every window shrinks to the
+-// same factor at a given x (≈1/6 at the screen edge with the default dials).
++// same factor at a given x (≈1/9 at the screen edge with the default dials).
+ function getWindowScale(xPos) {
+   const flankDist = Math.max(0, Math.abs(xPos) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
++  if (terracedMode) return terracedScale(flankDist);
+   const innerDeriv = 1 / (1 - WARP_DEADZONE);
+   const derivative = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH * innerDeriv;
+   return Math.max(MIN_SCALE, 1 / (1 + derivative));
+@@ -29,8 +71,10 @@ function getWindowScale(xPos) {
+ // The GRID's local scale at a normalized x — same curve as getWindowScale but UNCLAMPED.
+ // The shader's gridYcoord = centerY / localScale uses this exact (un-floored) value, so the
+ // drag band must too, or it would drift from the lines once the window hits MIN_SCALE.
++// (In terraced mode there is no floor, so the two functions coincide.)
+ function gridLocalScale(xPos) {
+   const flankDist = Math.max(0, Math.abs(xPos) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
++  if (terracedMode) return terracedScale(flankDist);
+   const innerDeriv = 1 / (1 - WARP_DEADZONE);
+   const derivative = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH * innerDeriv;
+   return 1 / (1 + derivative);
+@@ -38,21 +82,26 @@ function gridLocalScale(xPos) {
+ 
+ // Forward warp f(xs): PHYSICAL normalized x → LOGICAL normalized x. Closed form —
+ // the same curve the grid shader draws and the morph vertex shader inverts with
+-// Newton; the forward direction needs no iteration.
++// Newton; the forward direction needs no iteration. Branches on the "g" toggle.
+ function warpForward(xsNorm) {
++  if (terracedMode) {
++    const a = Math.abs(xsNorm);
++    if (a <= WARP_DEADZONE) return xsNorm;
++    const f = (a - WARP_DEADZONE) / (1 - WARP_DEADZONE);
++    return Math.sign(xsNorm) * (WARP_DEADZONE + terracedInt(f) * (1 - WARP_DEADZONE));
++  }
+   const flankDist = Math.max(0, Math.abs(xsNorm) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
+   return xsNorm + Math.sign(xsNorm) * Math.pow(flankDist, WARP_POWER) * WARP_STRENGTH;
+ }
+ 
+ // Newton inverse of warpForward (mirrors the morph vertex shader): LOGICAL
+-// normalized x → PHYSICAL normalized x. 4 iterations = sub-pixel on this smooth
+-// monotonic curve.
++// normalized x → PHYSICAL normalized x. The forward derivative is 1/gridLocalScale
++// for BOTH curve families, so one generic loop serves both; 6 iterations covers the
++// terraced curve's steeper g steps (the smooth cubic needed 4), sub-pixel either way.
+ function warpInverse(xwNorm) {
+   let xs = xwNorm;
+-  for (let i = 0; i < 4; i++) {
+-    const flankDist = Math.max(0, Math.abs(xs) - WARP_DEADZONE) / (1 - WARP_DEADZONE);
+-    const deriv = WARP_POWER * Math.pow(flankDist, Math.max(0, WARP_POWER - 1)) * WARP_STRENGTH / (1 - WARP_DEADZONE);
+-    xs -= (warpForward(xs) - xwNorm) / (1 + deriv);
++  for (let i = 0; i < 6; i++) {
++    xs -= (warpForward(xs) - xwNorm) * gridLocalScale(xs);
+   }
+   return xs;
+ }
+@@ -100,7 +149,7 @@ function stashColumn(isLeft, inner) {
+ 
+ // ── Main ──────────────────────────────────────────────────
+ 
+-export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform, dragActiveUniform, dragBandUniform, invalidate }) {
++export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc, revealUniform, warpUniform, dragActiveUniform, dragBandUniform, setTerraced, invalidate }) {
+   const raycaster = new THREE.Raycaster();
+   const ndc = new THREE.Vector2();
+   const dragPlane = new THREE.Plane();
+@@ -366,7 +415,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
+       // logical center out to (2 + WARP_STRENGTH)·half-width so the compressed
+       // VISUAL edge can reach the physical bezel (plans/vertex-warp-experiment.md).
+       const hw = (info.w * scale) / 2;
+-      const maxCx = (DESKTOP_W / 2) * (2 + WARP_STRENGTH) - hw;
++      // 1 + warpForward(1) = the logical desktop edge in half-widths, valid for
++      // BOTH curve families (cubic: 2 + WARP_STRENGTH; terraced: 1 + dz + ∫g·(1−dz)).
++      const maxCx = (DESKTOP_W / 2) * (1 + warpForward(1)) - hw;
+       cx = Math.min(Math.max(cx, DESKTOP_W - maxCx), maxCx);
+     } else {
+       // X: free drag with self-consistent clamp.
+@@ -617,6 +668,20 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
+     exposeSaved = null;
+   });
+ 
++  // ── Terraced warp (toggle "g") ────────────────────────────
++  // Live A/B of the terraced curve (plans/terraced-warp.md prototype): flips the JS
++  // curve functions, the grid shader, AND every morph material (via setTerraced from
++  // main.js) in one step — drag-shrink, drag rails, fresh stash parks, and morphing
++  // all follow the terraced profile while it's on. Windows already parked under the
++  // other curve keep their old scale until re-parked ("4" resets).
++  window.addEventListener('keydown', (e) => {
++    if (e.key.toLowerCase() !== 'g' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
++    terracedMode = !terracedMode;
++    setTerraced(terracedMode);
++    console.log(`[warp] ${terracedMode ? 'TERRACED (prototype)' : 'cubic'} curve`);
++    invalidate();
++  });
++
+   // ── Doubling (toggle "d") ─────────────────────────────────
+   // Shows/hides the window clones built in main.js, doubling the desktop to 10
+   // windows so Exposé ("e") demonstrates its clutter problem. On show, each clone
