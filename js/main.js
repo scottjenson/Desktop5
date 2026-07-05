@@ -650,6 +650,16 @@ window.addEventListener('keydown', (e) => {
   invalidate();
 });
 
+// "?" toggles the demo-key help overlay — plain DOM layered above #gl (presenter
+// chrome, not part of the scene: no texture, no invalidate). pointer-events:none in
+// CSS keeps the demo interactive while it's up.
+const helpOverlay = document.getElementById('help-overlay');
+window.addEventListener('keydown', (e) => {
+  if (e.key === '?' && !e.repeat && !e.metaKey && !e.ctrlKey) {
+    helpOverlay.hidden = !helpOverlay.hidden;
+  }
+});
+
 // "4" resets every window to its original position/scale/morph/visibility so the demo
 // can be re-run without reloading. Touches windows ONLY — the menubar and grid lines
 // (their own meshes/uniforms) are left exactly as they are.

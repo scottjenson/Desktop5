@@ -23,6 +23,62 @@ html, body {
   transform: translate(-50%, -50%);
 }
 
+/* Demo-key help overlay ("?"). Sized in viewport px (it lives above the letterboxed
+   #gl, outside the 3440×1440 desktop space, so text stays crisp at any scale).
+   pointer-events:none keeps the demo interactive underneath. */
+#help-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+#help-overlay:not([hidden]) { display: flex; }
+#help-card {
+  background: rgba(13, 27, 62, 0.92);           /* grid backdrop blue */
+  border: 1px solid rgba(10, 132, 255, 0.45);    /* --accent halo */
+  border-radius: 12px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  padding: 22px 28px;
+  color: #e6eeff;                                /* grid line near-white */
+  min-width: 460px;
+}
+#help-card h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0a84ff;
+  margin-bottom: 14px;
+}
+.help-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 14px;
+  line-height: 1.9;
+}
+.help-row kbd {
+  flex: 0 0 34px;
+  text-align: center;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  background: rgba(230, 238, 255, 0.12);
+  border: 1px solid rgba(230, 238, 255, 0.25);
+  border-radius: 5px;
+  padding: 1px 0;
+}
+.help-gestures {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(230, 238, 255, 0.15);
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(230, 238, 255, 0.65);
+}
+
 /* Hidden texture-source canvases. Parked off-screen; still rasterize on paint. */
 #sources {
   position: fixed;

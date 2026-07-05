@@ -12,6 +12,27 @@
 <!-- Visible WebGL output. Receives all pointer events; raycaster maps them to meshes. -->
 <canvas id="gl"></canvas>
 
+<!-- Demo-key help ("?" toggles, main.js). Presenter chrome: plain DOM layered above
+     #gl, NOT part of the 3D desktop — no source canvas, no texture, and
+     pointer-events:none so the demo stays fully interactive while it's up. -->
+<div id="help-overlay" hidden>
+  <div id="help-card">
+    <h2>Demo keys</h2>
+    <div class="help-row"><kbd>1</kbd><span>Center the menubar into its pill</span></div>
+    <div class="help-row"><kbd>2</kbd><span>Reveal / hide the grid (first reveal boots the warp)</span></div>
+    <div class="help-row"><kbd>3</kbd><span>Hide / show all windows</span></div>
+    <div class="help-row"><kbd>4</kbd><span>Reset all windows to their start state</span></div>
+    <div class="help-row"><kbd>0</kbd><span>Morph the frontmost window along the grid</span></div>
+    <div class="help-row"><kbd>&minus;</kbd><span>Morph shape: faithful &harr; creased (while morphed)</span></div>
+    <div class="help-row"><kbd>E</kbd><span><em>Hold:</em> Expos&eacute; &mdash; spread all windows; release to restore</span></div>
+    <div class="help-row"><kbd>D</kbd><span>Double every window (10-window clutter)</span></div>
+    <div class="help-row"><kbd>?</kbd><span>Toggle this help</span></div>
+    <p class="help-gestures">Drag a titlebar to move &middot; shift&#8209;drag to edge&#8209;snap &middot;
+      shift&#8209;click to park / restore &middot; shake while dragging to stash the rest &middot;
+      wheel scrolls the frontmost window</p>
+  </div>
+</div>
+
 <!--
   Hidden texture sources. Each <canvas layoutsubtree> rasterizes one subtree into
   its own HTMLTexture. The chrome canvas is inline; the four window canvases are
