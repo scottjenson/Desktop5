@@ -30,9 +30,11 @@ export const SHRUNK_PX       = 110;  // ~icon target width (px) for a window at 
 // each column's scale is getWindowScale() at its x, so a parked window sits exactly
 // on the drag-shrink curve (no scale jump when re-grabbed). Positions are hand-placed
 // for lateral clearance with the widest window (760px) in both columns at once:
-// edge zone (0–200) | outer col ≈0.22 (202–368) | inner col ≈0.56 (378–802) | plateau (860+).
+// edge zone (0–200) | outer col ≈0.22 (202–368) | inner col ≈0.62 (386–854) | plateau (860+).
+// Inner sits as close to the plateau as the widest window allows (854 vs 860) to
+// maximize its warp-derived zoom — 625+ would poke into the orthogonal area.
 // Left-side px; the right side mirrors (DESKTOP_W − cx).
-export const STASH_INNER_CX = 590; // recent windows park here (larger)
+export const STASH_INNER_CX = 620; // recent windows park here (larger)
 export const STASH_OUTER_CX = 285; // overflow parks here (smaller)
 
 // ── UX Tension Warp dials (SHARED by the grid shader AND window scaling) ──
@@ -92,8 +94,9 @@ export const EXPOSE_FILL      = 0.55; // target fraction of the box area the win
 // edge), swap to a stripped-down layout with one giant Play/Pause button. The button
 // size is shared by the JS hit-rect and the CSS (#win-music.compact .music-play-btn),
 // expressed in the music bitmap's own px (canvas is 680×480); keep the two in sync.
-// Threshold sits BELOW the outer stash column (≈0.22) so compact appears only at the
-// icon-sized window edge (icon ≈ 0.15), never in the park; the live-drag MIN_SCALE
-// floor (0.20) is not strictly below it, so dragging alone never flips compact either.
-export const MUSIC_COMPACT_SCALE   = 0.2; // mesh.scale.x threshold to enter compact mode
+// Threshold is pinned between two deterministic neighbors: strictly ABOVE the live-drag
+// MIN_SCALE floor (0.20 — a plain drag to the bezel rests exactly there, and must go
+// compact) and strictly BELOW the outer stash column (≈0.219 — parked windows must
+// keep the full layout). The margins are thin but both bounds are computed, not measured.
+export const MUSIC_COMPACT_SCALE   = 0.21; // mesh.scale.x threshold to enter compact mode
 export const MUSIC_COMPACT_BTN_PX  = 280; // giant play button size, centered in the 680×480 bitmap

@@ -89,7 +89,7 @@ function snapToEdge(isLeft, info) {
     : { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale };
 }
 
-// Stash columns: two per side (inner ≈0.56, outer ≈0.22 — positions in config.js).
+// Stash columns: two per side (inner ≈0.62, outer ≈0.22 — positions in config.js).
 // Scale is WARP-DERIVED — getWindowScale at the column's x — so every parked window
 // sits exactly on the drag-shrink curve and re-grabbing it causes no scale jump.
 function stashColumn(isLeft, inner) {
