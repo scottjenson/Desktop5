@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import {
   DESKTOP_W, DESKTOP_H, TITLEBAR_H, MENUBAR_H, DOCK_CLEARANCE, Z_STEP,
-  PLATEAU_FRAC, SHRUNK_PX, SNAP_ZONE_STEP, MID_SCALE, MIN_SCALE,
+  SHRUNK_PX, SNAP_ZONE_STEP, MIN_SCALE, STASH_INNER_CX, STASH_OUTER_CX,
   WARP_DEADZONE, WARP_POWER, WARP_STRENGTH,
   SHAKE_MIN_TRAVEL, SHAKE_WINDOW_MS, SHAKE_COUNT,
   HIGHLIGHT_FADE_IN_MS, HIGHLIGHT_FADE_OUT_MS,
@@ -89,13 +89,13 @@ function snapToEdge(isLeft, info) {
     : { cx: DESKTOP_W - SHRUNK_PX / 2, scale: iconScale };
 }
 
-// Stash zones: 50%-scale mid positions used by stashAll() and shift-click.
-const _pL = DESKTOP_W * (1 - PLATEAU_FRAC) / 2;
-const _pR = DESKTOP_W * (1 + PLATEAU_FRAC) / 2;
-function snapToStash(isLeft) {
-  return isLeft
-    ? { cx: (_iW + _pL) / 2,             scale: MID_SCALE }
-    : { cx: (_pR + DESKTOP_W - _iW) / 2, scale: MID_SCALE };
+// Stash columns: two per side (inner ≈0.56, outer ≈0.22 — positions in config.js).
+// Scale is WARP-DERIVED — getWindowScale at the column's x — so every parked window
+// sits exactly on the drag-shrink curve and re-grabbing it causes no scale jump.
+function stashColumn(isLeft, inner) {
+  const px = inner ? STASH_INNER_CX : STASH_OUTER_CX;
+  const cx = isLeft ? px : DESKTOP_W - px;
+  return { cx, scale: getWindowScale((cx - DESKTOP_W / 2) / (DESKTOP_W / 2)) };
 }
 
 // ── Main ──────────────────────────────────────────────────
@@ -470,37 +470,75 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   }
 
   // ── Stash-all (shake gesture) ─────────────────────────────
-  // Stashes all full-size windows to stash zones, except the one being dragged.
-  function stashAll(excludeMesh) {
-    const leftGroup = [];
-    const rightGroup = [];
+  // Parks every other full-size window into the two warp-derived columns on its side.
+  // Assignment is by RECENCY: the stack is walked front-to-back, so the most recently
+  // used windows claim the inner (larger) column until its height budget is spent and
+  // the rest overflow to the outer column — the park is a legibility hierarchy, not
+  // just storage. Still stateless (Learning #8): nothing is remembered or restored.
+  const STASH_GAP = 10;
 
-    for (const w of stack) {
-      if (w.mesh === excludeMesh) continue;
-      if (w.mesh.scale.x < 0.95) continue;
-      const curCx = worldToCenter(w.mesh.position.x, 0).cx;
-      const curCy = DESKTOP_H / 2 - w.mesh.position.y / S;
-      const snap = snapToStash(curCx < DESKTOP_W / 2);
-      const halfH = (w.h * snap.scale) / 2;
-      const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
-      (curCx < DESKTOP_W / 2 ? leftGroup : rightGroup).push({ w, snap, cy });
+  // Fit a column's windows non-overlapping into the menubar↔dock band, each as close
+  // to its current cy as possible: forward pass pushes overlaps down, backward pass
+  // pulls the pile back up from the dock. If the column can't hold everyone at the
+  // column scale (safety net — capacity math says it won't happen at 10 windows),
+  // shrink the whole column to fit, keeping the total height solvable for both passes.
+  function layoutColumn(items, colCx, colScale) {
+    if (!items.length) return;
+    const top = MENUBAR_H, bot = DESKTOP_H - DOCK_CLEARANCE;
+    const gaps = STASH_GAP * (items.length - 1);
+    const sumH = items.reduce((sum, it) => sum + it.w.h, 0);
+    const s = Math.min(colScale, (bot - top - gaps) / sumH);
+
+    items.sort((a, b) => a.cy - b.cy);
+    let prevBottom = top - STASH_GAP;
+    for (const it of items) {
+      const half = (it.w.h * s) / 2;
+      it.cy = Math.max(it.cy, prevBottom + STASH_GAP + half);
+      prevBottom = it.cy + half;
+    }
+    let nextTop = bot + STASH_GAP;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const half = (items[i].w.h * s) / 2;
+      items[i].cy = Math.min(items[i].cy, nextTop - STASH_GAP - half);
+      nextTop = items[i].cy - half;
     }
 
-    for (const group of [leftGroup, rightGroup]) {
-      group.sort((a, b) => a.cy - b.cy);
-      for (let i = 1; i < group.length; i++) {
-        const prev = group[i - 1];
-        const cur  = group[i];
-        const prevBottom = prev.cy + (prev.w.h * prev.snap.scale) / 2;
-        const curHalfH   = (cur.w.h  * cur.snap.scale)  / 2;
-        const minCy = prevBottom + 10 + curHalfH;
-        if (cur.cy < minCy) cur.cy = Math.min(minCy, DESKTOP_H - DOCK_CLEARANCE - curHalfH);
+    for (const it of items) {
+      const p = centerToWorld(colCx, it.cy);
+      animateTo(it.w.mesh, p.x, p.y, s);
+    }
+  }
+
+  function stashAll(excludeMesh) {
+    const band = DESKTOP_H - DOCK_CLEARANCE - MENUBAR_H;
+    const innerScale = stashColumn(true, true).scale; // same both sides
+    const sides = {
+      left:  { inner: [], outer: [], innerH: 0 },
+      right: { inner: [], outer: [], innerH: 0 },
+    };
+
+    for (let i = stack.length - 1; i >= 0; i--) { // front-to-back = recency order
+      const w = stack[i];
+      if (w.mesh === excludeMesh || !w.mesh.visible) continue;
+      if (w.mesh.scale.x < 0.95) continue;
+      const cx = worldToCenter(w.mesh.position.x, 0).cx;
+      const cy = DESKTOP_H / 2 - w.mesh.position.y / S;
+      const side = sides[cx < DESKTOP_W / 2 ? 'left' : 'right'];
+      const need = w.h * innerScale + (side.inner.length ? STASH_GAP : 0);
+      if (side.innerH + need <= band) {
+        side.inner.push({ w, cy });
+        side.innerH += need;
+      } else {
+        side.outer.push({ w, cy });
       }
     }
 
-    for (const { w, snap, cy } of [...leftGroup, ...rightGroup]) {
-      const p = centerToWorld(snap.cx, cy);
-      animateTo(w.mesh, p.x, p.y, snap.scale);
+    for (const isLeft of [true, false]) {
+      const side = sides[isLeft ? 'left' : 'right'];
+      const inner = stashColumn(isLeft, true);
+      const outer = stashColumn(isLeft, false);
+      layoutColumn(side.inner, inner.cx, inner.scale);
+      layoutColumn(side.outer, outer.cx, outer.scale);
     }
   }
 
@@ -737,8 +775,9 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
       const curCx = worldToCenter(mesh.position.x, 0).cx;
       const curCy = DESKTOP_H / 2 - mesh.position.y / S;
       if (curScale >= 0.95) {
-        // Full-size → stash on current side.
-        const snap = snapToStash(curCx < DESKTOP_W / 2);
+        // Full-size → park in the inner stash column on the current side (a single
+        // window has no crowding pressure, so it always gets the larger column).
+        const snap = stashColumn(curCx < DESKTOP_W / 2, true);
         const halfH = (info.h * snap.scale) / 2;
         const cy = Math.min(Math.max(curCy, MENUBAR_H + halfH), DESKTOP_H - DOCK_CLEARANCE - halfH);
         animateTo(mesh, centerToWorld(snap.cx, cy).x, centerToWorld(snap.cx, cy).y, snap.scale);

@@ -24,8 +24,16 @@ export const RENDER_SUPERSAMPLE = 2;
 
 // Dynamic drag-shrink: a central plateau stays full-size; a window shrinks
 // toward the edges so it can be "placed back" in space (scale, not real z).
-export const PLATEAU_FRAC    = 0.5;  // central fraction used for zone layout & snap positions
 export const SHRUNK_PX       = 110;  // ~icon target width (px) for a window at the edge
+
+// Stash columns (shake-to-stash / shift-click park): TWO per side, WARP-DERIVED —
+// each column's scale is getWindowScale() at its x, so a parked window sits exactly
+// on the drag-shrink curve (no scale jump when re-grabbed). Positions are hand-placed
+// for lateral clearance with the widest window (760px) in both columns at once:
+// edge zone (0–200) | outer col ≈0.22 (202–368) | inner col ≈0.56 (378–802) | plateau (860+).
+// Left-side px; the right side mirrors (DESKTOP_W − cx).
+export const STASH_INNER_CX = 590; // recent windows park here (larger)
+export const STASH_OUTER_CX = 285; // overflow parks here (smaller)
 
 // ── UX Tension Warp dials (SHARED by the grid shader AND window scaling) ──
 // The background grid's X coordinate is warped by a power curve; the window scale
@@ -39,7 +47,6 @@ export const SNAP_ZONE_STEP    = 100;  // px of horizontal movement to trigger e
 export const SHAKE_MIN_TRAVEL  = 20;   // min px between reversals to count (filters jitter)
 export const SHAKE_WINDOW_MS   = 500;  // rolling time window for reversal timestamps
 export const SHAKE_COUNT       = 4;    // number of reversals to trigger parkAll
-export const MID_SCALE       = 0.5;  // scale for mid-zone parked windows (zones 1 and 4)
 export const MIN_SCALE       = 0.20; // minimum scale during live drag (edge floor)
 export const GRID_CELL_PX    = 86;   // baseline grid cell size: 3440/86 = exactly 40 columns across the desktop
 
@@ -85,5 +92,8 @@ export const EXPOSE_FILL      = 0.55; // target fraction of the box area the win
 // edge), swap to a stripped-down layout with one giant Play/Pause button. The button
 // size is shared by the JS hit-rect and the CSS (#win-music.compact .music-play-btn),
 // expressed in the music bitmap's own px (canvas is 680×480); keep the two in sync.
-export const MUSIC_COMPACT_SCALE   = 0.3; // mesh.scale.x threshold to enter compact mode
+// Threshold sits BELOW the outer stash column (≈0.22) so compact appears only at the
+// icon-sized window edge (icon ≈ 0.15), never in the park; the live-drag MIN_SCALE
+// floor (0.20) is not strictly below it, so dragging alone never flips compact either.
+export const MUSIC_COMPACT_SCALE   = 0.2; // mesh.scale.x threshold to enter compact mode
 export const MUSIC_COMPACT_BTN_PX  = 280; // giant play button size, centered in the 680×480 bitmap
