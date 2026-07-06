@@ -6,6 +6,18 @@
   --menubar-h: 39px;
   --titlebar-h: 30px;
   --accent: #0a84ff;
+
+  /* ── Light window chrome, shared by finder/browser/wordprocessor/obsidian
+        (window-specific vars live in each css/windows/<name>.css) ── */
+  --win-toolbar-bg:  #f5f5f7;        /* toolbar / statusbar fills */
+  --win-panel-bg:    #f0f0f0;        /* sidebar / outer chrome fills */
+  --win-bg-raised:   #f8f8f8;        /* slightly-off-white: address bar, active tab */
+  --win-border:      rgba(0,0,0,0.10);
+  --win-border-med:  rgba(0,0,0,0.12);
+  --win-heading:     #1a1a1a;        /* near-black headings */
+  --win-text:        #333;           /* body text */
+  --win-text-dim:    #888;           /* de-emphasised labels */
+  --win-accent:      #0a84ff;        /* Apple system blue */
 }
 
 html, body {

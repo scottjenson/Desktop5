@@ -50,18 +50,23 @@ There are **two kinds** of canvas:
 
 ### File structure
 ```
-index.html      #gl output canvas + hidden #sources (chrome/menubar inline + one <canvas> per window)
-css/base.css    reset, :root vars, #gl letterbox positioning, #sources off-screen parking
+index.html      #gl output canvas + help overlay + hidden #sources (chrome/menubar inline + one <canvas> per window)
+css/base.css    reset, :root vars (incl. shared --win-* window-chrome palette), #gl letterbox
+                positioning, help overlay, #sources off-screen parking
 css/desktop.css chrome: wallpaper, menubar, dock, trash + SHARED window frame (.os-window, titlebar)
-css/windows.css per-window INTERNAL styles only (no size/position)
+css/windows/    one stylesheet per window (INTERNAL styles only, no size/position), mirroring
+                windows/<name>.html; window-specific :root vars live in their own file
 js/config.js    ALL shared constants (single source of truth): desktop/camera dims, drag-shrink +
                 warp dials (shared with the grid shader), grid look, shake/stash, music compact
+js/warp.js      stateless warp-curve math (getWindowScale, warpForward/Inverse, cursorToLogical)
+                + edge-zone/stash-column geometry — pure functions of config dials
+js/morph.js     morph material factory (the big GLSL) + setWarpBlend/setMorphMode per-mesh setters
 js/main.js      scene/camera/renderer; discovers sources, builds texture+mesh per window; ON-DEMAND
                 render loop (invalidate() + texture.version polling — Learning #12); caches scrollEl
-                per window at init; "0" morph + "4" reset demo keys
+                per window at init; "0"/"-" morph, "4" reset, "?" help demo keys
 js/windows.js   raycaster focus + titlebar drag; bounded z-slot stacking; shift-drag edge snap;
-                shake-to-stash + shift-click stash; mesh animation engine; frontmost-window
-                scroll routing; "1"/"2"/"3" demo keys
+                shake-to-stash + shift-click stash; wp text selection (Learning #13); mesh animation
+                engine; Exposé/doubling; frontmost-window scroll routing; "1"/"2"/"3"/"E"/"D" keys
 windows/*.html  five window fragments (finder, obsidian, browser, music, wordprocessor)
 ```
 
@@ -81,7 +86,7 @@ windows/*.html  five window fragments (finder, obsidian, browser, music, wordpro
 ---
 ## ➕ Adding a New Window
 1. **Fragment:** create `windows/<name>.html` with root `<div class="os-window" id="win-<name>">` containing a `.win-titlebar` (traffic lights + `.win-title`) and a `.win-body`. **Do not** set width/height/top/left/z-index.
-2. **Styles:** add internal styles to `css/windows.css`, scoped with `#win-<name>`. For a dark titlebar, override `#win-<name> .win-titlebar`.
+2. **Styles:** create `css/windows/<name>.css` (internal styles only; put window-specific `:root` vars there; shared `--win-*` palette comes from base.css) and add its `<link>` in `index.html`. For a dark titlebar, override `#win-<name> .win-titlebar`.
 3. **Source canvas:** add one line under `#sources` in `index.html`:
    `<canvas class="src" data-id="<name>" data-x="<px>" data-y="<px>" layoutsubtree width="<w>" height="<h>"></canvas>`
    — `width/height` = window size; `data-x/data-y` = initial desktop-px top-left; DOM order is back→front. The `layoutsubtree` attribute is mandatory — without it the subtree won't rasterize.
@@ -151,5 +156,6 @@ Sluggish on a fanless laptop with the original setup: a fixed 3440×1440×2 buff
 **Deferred polish:** edge-recession depth, window drop-shadows (source-canvas padding), focus animation.
 
 **Backlog (parked):**
+* **Split the `initWindows()` closure (windows.js, ~800 lines).** Deliberately deferred: its sections share state (`stack`, `drag`, `textSel`, raycaster, `animateTo`, `invalidate`), so splitting means threading a context object through 5–6 modules — regression risk in the demo-critical file for modest gain while it's well-sectioned. Do it as its own task when Phase B lands more input code; the seam is input/gestures vs. window-features. (The stateless helpers already moved to js/warp.js.)
 * **Startup `InvalidStateError` (texElementImage2D).** The render loop uploads `HTMLTexture` bitmaps before the first `onpaint`. Fix: delay `scene.add(mesh)` until a per-canvas first-paint `Promise` resolves. Harmless; self-corrects after first paint.
 * **Window resize / full-height / maximize.** Size lives in 3 coupled places (source-canvas bitmap, `.os-window` px, mesh geometry) + registry `info.w/h`. Before building: switch geometry to a **unit plane + `mesh.scale`**; add one `setWindowSize(win,w,h)` that re-derives everything (bitmap → re-paint → DOM px → scale → recompute center & clamp, save restore size); and **spike a runtime `layoutsubtree` canvas resize** first (unproven — content must re-layout, not just scale). Stacking/raycaster are unaffected by size.

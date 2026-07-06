@@ -1,0 +1,84 @@
+/* Finder window — internal styles only (frame/size come from desktop.css + the
+   source-canvas px). Shared --win-* vars live in base.css. */
+
+.finder-sidebar {
+  width: 180px;
+  background: var(--win-panel-bg);
+  border-right: 0.5px solid var(--win-border);
+  padding: 10px 0;
+  flex-shrink: 0;
+  font-size: 12px;
+  overflow-y: auto;
+}
+.finder-sidebar-section { margin-bottom: 14px; }
+.finder-sidebar-label {
+  font-size: 10px; font-weight: 700;
+  color: var(--win-text-dim); text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 14px 6px;
+}
+.finder-sidebar-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  margin: 0 4px;
+  color: var(--win-heading);
+  cursor: default;
+}
+.finder-sidebar-item:hover { background: rgba(0,0,0,0.06); }
+.finder-sidebar-item.active { background: var(--accent); color: #fff; }
+.finder-sidebar-item .si-icon { font-size: 14px; }
+
+.finder-main {
+  flex: 1;
+  background: #fff;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 8px;
+  align-content: start;
+  overflow-y: auto;
+}
+.finder-toolbar {
+  background: var(--win-toolbar-bg);
+  border-bottom: 0.5px solid var(--win-border);
+  height: 42px;
+  display: flex; align-items: center; padding: 0 14px; gap: 10px;
+  flex-shrink: 0;
+}
+.finder-toolbar-btn {
+  width: 28px; height: 22px;
+  border-radius: 5px;
+  background: rgba(0,0,0,0.07);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+}
+.finder-search {
+  margin-left: auto;
+  background: rgba(0,0,0,0.07);
+  border-radius: 6px;
+  width: 160px; height: 22px;
+  display: flex; align-items: center; padding: 0 8px; gap: 5px;
+  font-size: 11px; color: var(--win-text-dim);
+}
+
+.finder-file {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 8px 4px;
+  border-radius: 6px;
+  cursor: default;
+}
+.finder-file:hover { background: rgba(0,0,0,0.05); }
+.finder-file.selected { background: var(--accent); }
+.finder-file.selected .file-name { color: #fff; }
+.file-icon { font-size: 36px; line-height: 1; }
+.file-name { font-size: 11px; color: var(--win-heading); text-align: center; line-height: 1.3; word-break: break-word; }
+.finder-statusbar {
+  height: 24px;
+  background: var(--win-toolbar-bg);
+  border-top: 0.5px solid var(--win-border);
+  display: flex; align-items: center; padding: 0 14px;
+  font-size: 11px; color: #666;
+  flex-shrink: 0;
+}
+.finder-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; }

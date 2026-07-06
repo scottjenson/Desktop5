@@ -1,0 +1,98 @@
+/* Browser window — internal styles only (frame/size come from desktop.css + the
+   source-canvas px). Shared --win-* vars live in base.css. */
+
+.browser-chrome {
+  background: var(--win-panel-bg);
+  border-bottom: 0.5px solid var(--win-border-med);
+  flex-shrink: 0;
+}
+.browser-tabs {
+  display: flex; align-items: flex-end;
+  padding: 8px 10px 0;
+  gap: 2px;
+}
+.browser-tab {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 8px 8px 0 0;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: #555;
+  background: #dcdcdc;
+  cursor: default;
+  max-width: 180px;
+}
+.browser-tab.active {
+  background: var(--win-bg-raised);
+  color: var(--win-heading);
+  font-weight: 500;
+}
+.browser-tab .tab-favicon { font-size: 11px; }
+.browser-tab .tab-close { margin-left: auto; font-size: 10px; color: #aaa; }
+.browser-addressbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  background: var(--win-bg-raised);
+}
+.browser-nav-btn { font-size: 16px; color: var(--win-text-dim); cursor: default; }
+.browser-url {
+  flex: 1;
+  background: rgba(0,0,0,0.06);
+  border-radius: 8px;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 10px; gap: 6px;
+  font-size: 12px; color: #444;
+}
+.browser-url .lock { font-size: 11px; color: #2a9d2a; }
+.browser-url .domain { font-weight: 500; }
+.browser-url .path { color: var(--win-text-dim); }
+
+.browser-content {
+  flex: 1;
+  background: #fff;
+  overflow-y: auto;
+}
+/* fake webpage inside browser */
+.page-nav {
+  height: 52px;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex; align-items: center; padding: 0 32px; gap: 32px;
+}
+.page-logo { font-size: 18px; font-weight: 900; color: var(--win-heading); letter-spacing: -0.03em; }
+.page-nav-links { display: flex; gap: 22px; }
+.page-nav-link { font-size: 13px; color: #555; }
+.page-nav-link.active { color: var(--win-accent); }
+.page-hero {
+  background: linear-gradient(135deg, #0f2044 0%, #1a4080 100%);
+  padding: 48px 40px 40px;
+  color: #fff;
+}
+.page-hero-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.6); margin-bottom: 10px; }
+.page-hero-h1 { font-size: 30px; font-weight: 800; line-height: 1.2; margin-bottom: 12px; }
+.page-hero-sub { font-size: 14px; color: rgba(255,255,255,0.72); line-height: 1.6; max-width: 500px; }
+.page-hero-cta {
+  margin-top: 22px;
+  display: inline-block;
+  background: var(--win-accent); color: #fff;
+  font-size: 13px; font-weight: 600;
+  padding: 10px 22px; border-radius: 8px;
+}
+.page-body { padding: 32px 40px; }
+.page-section-label { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--win-accent); margin-bottom: 10px; }
+.page-h2 { font-size: 20px; font-weight: 700; color: var(--win-heading); margin-bottom: 12px; }
+.page-p { font-size: 13px; line-height: 1.7; color: #555; margin-bottom: 14px; }
+.page-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 20px 0; }
+.page-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.page-card-img {
+  height: 80px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px;
+}
+.page-card-body { padding: 12px; }
+.page-card-title { font-size: 13px; font-weight: 600; color: var(--win-heading); margin-bottom: 4px; }
+.page-card-desc { font-size: 11px; color: #777; line-height: 1.5; }
