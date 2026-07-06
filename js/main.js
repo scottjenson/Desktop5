@@ -560,15 +560,18 @@ await Promise.all(sources.map(async (canvas, i) => {
     return oy === 'auto' || oy === 'scroll';
   }) ?? null;
 
-  // Music window: cache play button hit area, bar elements, and the window root
-  // before layoutsubtree hides the DOM after first paint. rootEl is used at runtime
-  // to toggle the .compact class (responsive giant-play layout).
-  let playHitRect = null, playBtnEl = null, barEls = null, rootEl = null;
+  // Every window: keep the .os-window root ref (survives reparenting — Learning #9).
+  // Music uses it to toggle .compact; the word processor's text selection uses its
+  // LIVE getBoundingClientRect to map raycaster uv → client px for caret lookup.
+  const rootEl = el;
+
+  // Music window: cache play button hit area and bar elements before layoutsubtree
+  // hides the DOM after first paint.
+  let playHitRect = null, playBtnEl = null, barEls = null;
   if (id === 'music') {
     const hitEl = canvas.querySelector('.music-play-hit');
     playBtnEl   = canvas.querySelector('.music-play-btn');
     barEls      = [...canvas.querySelectorAll('.music-bar')];
-    rootEl      = el; // the .os-window root
     if (hitEl) {
       const cr = canvas.getBoundingClientRect();
       const hr = hitEl.getBoundingClientRect();

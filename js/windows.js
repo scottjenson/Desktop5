@@ -109,6 +109,7 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   const meshes = windowMeshes.map((w) => w.mesh);
   const infoOf = new Map(windowMeshes.map((w) => [w.mesh, w]));
   let drag = null;
+  let textSel = null; // active word-processor text-selection drag (mutually exclusive with drag)
 
   const stack = [...windowMeshes];
   function restack() {
@@ -257,6 +258,75 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     setMusicCompact(musicInfo.mesh.scale.x < MUSIC_COMPACT_SCALE);
   }
 
+  // ── Word-processor text selection ─────────────────────────
+  // Native selection can't be triggered by synthetic events (untrusted), so body
+  // drags on the wp window drive the Selection API directly: anchor caret on
+  // mousedown, setBaseAndExtent on mousemove. Chrome paints the highlight into the
+  // window's texture, so it renders at ANY mesh scale — uv → local px is
+  // scale-invariant. Cmd+C works on the result (real selection on real DOM).
+  //
+  // Map a window-local design-px point → client px on the live reparented DOM →
+  // text caret. The LIVE root rect absorbs zoom/position, assuming Chrome hit-tests
+  // the reparented DOM in gBCR space (verified by the [sel-probe] in main.js).
+  // Returns null when the caret API can't see the DOM (probe failed) — callers
+  // fall back to normal window behavior.
+  function caretFromLocal(info, localX, localY) {
+    if (!document.caretRangeFromPoint || !info.rootEl) return null;
+    const r = info.rootEl.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const x = r.left + (localX / info.w) * r.width;
+    let y = r.top + (localY / info.h) * r.height;
+
+    // The reparented window DOMs all overlap in client space and occlude each other
+    // for hit-testing ([sel-probe]: the wp was hittable only in the ~80px sliver not
+    // covered by other windows). Lift every other reparented root (#gl children:
+    // windows + chrome + menubar) out of hit-testing for this synchronous lookup —
+    // pointer-events doesn't affect rendering, so no repaint.
+    const blockers = [...gl.children].filter((c) => c !== info.rootEl && c.style);
+    const prevPe = blockers.map((c) => c.style.pointerEvents);
+    blockers.forEach((c) => { c.style.pointerEvents = 'none'; });
+
+    // caretRangeFromPoint only sees points INSIDE the browser viewport, but the
+    // window's layout box can extend below it ([sel-probe]: wp spans to client
+    // y=1050 in a ~790px-tall viewport). Borrow the window's own internal scroll to
+    // bring the target content up for the lookup; restored synchronously, before
+    // any paint can observe it.
+    const sc = info.scrollEl;
+    const yLimit = window.innerHeight - 2;
+    let scrollAdj = 0;
+    if (y > yLimit && sc) {
+      scrollAdj = Math.max(0, Math.min(y - yLimit, sc.scrollHeight - sc.clientHeight - sc.scrollTop));
+      if (scrollAdj) { sc.scrollTop += scrollAdj; y -= scrollAdj; }
+    }
+
+    let range = null;
+    try {
+      range = document.caretRangeFromPoint(x, Math.min(y, yLimit));
+    } finally {
+      if (scrollAdj) sc.scrollTop -= scrollAdj;
+      blockers.forEach((c, i) => { c.style.pointerEvents = prevPe[i]; });
+    }
+    if (!range || !info.rootEl.contains(range.startContainer)) return null;
+    return range;
+  }
+
+  // Cursor → window-local design px via the window's z-plane (not intersectObject),
+  // so a selection drag can extend PAST the mesh edges; clamped to the window.
+  const _selPlaneNormal = new THREE.Vector3(0, 0, 1);
+  function windowLocalFromEvent(e, info) {
+    toNdc(e);
+    raycaster.setFromCamera(ndc, camera);
+    dragPlane.setFromNormalAndCoplanarPoint(_selPlaneNormal, info.mesh.position);
+    if (!raycaster.ray.intersectPlane(dragPlane, hit)) return null;
+    const s = info.mesh.scale.x || 1;
+    const localX = (hit.x - info.mesh.position.x) / (s * S) + info.w / 2;
+    const localY = info.h / 2 - (hit.y - info.mesh.position.y) / (s * S);
+    return {
+      x: Math.min(Math.max(localX, 0), info.w),
+      y: Math.min(Math.max(localY, 0), info.h),
+    };
+  }
+
   // ── Input ───────────────────────────────────────────────
   gl.addEventListener('mousedown', (e) => {
     toNdc(e);
@@ -304,6 +374,22 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     const isShift = e.shiftKey;
     const isIconSized = mesh.scale.x <= Math.max(SHRUNK_PX / info.w, MIN_SCALE) * 1.1;
 
+    // Word-processor body drag = text selection (body drags on full-size windows
+    // were previously unclaimed). Shift and icon-sized keep their window gestures;
+    // a failed caret lookup falls through to normal behavior.
+    if (info.id === 'wordprocessor' && !isShift && !isIconSized && localY > TITLEBAR_H) {
+      const anchor = caretFromLocal(info, hits[0].uv.x * info.w, localY);
+      if (anchor) {
+        window.getSelection().setBaseAndExtent(
+          anchor.startContainer, anchor.startOffset,
+          anchor.startContainer, anchor.startOffset); // click = collapse to caret
+        textSel = { info, anchor };
+        info.canvas.requestPaint?.();
+        e.preventDefault();
+        return;
+      }
+    }
+
     // Normal drag: titlebar only. Shift-drag or icon-sized: anywhere on the window.
     if (localY <= TITLEBAR_H || isShift || isIconSized) {
       dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), mesh.position);
@@ -343,7 +429,35 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   });
 
   window.addEventListener('mousemove', (e) => {
-    if (!drag) return;
+    // Text selection drag: extend to the caret under the cursor (clamped to the
+    // window, so dragging past an edge selects to that edge).
+    if (textSel) {
+      const p = windowLocalFromEvent(e, textSel.info);
+      if (p) {
+        const focus = caretFromLocal(textSel.info, p.x, p.y);
+        if (focus) {
+          window.getSelection().setBaseAndExtent(
+            textSel.anchor.startContainer, textSel.anchor.startOffset,
+            focus.startContainer, focus.startOffset);
+          textSel.info.canvas.requestPaint?.();
+        }
+      }
+      return;
+    }
+
+    // Idle hover: text cursor over the wp body (the selection affordance).
+    if (!drag) {
+      toNdc(e);
+      raycaster.setFromCamera(ndc, camera);
+      const hover = raycaster.intersectObjects(meshes, false).filter((h) => h.object.visible)[0];
+      const hInfo = hover && infoOf.get(hover.object);
+      const overWpBody = hInfo?.id === 'wordprocessor'
+        && (1 - hover.uv.y) * hInfo.h > TITLEBAR_H
+        && hover.object.scale.x > Math.max(SHRUNK_PX / hInfo.w, MIN_SCALE) * 1.1;
+      gl.style.cursor = overWpBody ? 'text' : '';
+      return;
+    }
+
     toNdc(e);
     raycaster.setFromCamera(ndc, camera);
     if (!raycaster.ray.intersectPlane(dragPlane, hit)) return;
@@ -752,6 +866,8 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
   }, { passive: false });
 
   window.addEventListener('mouseup', () => {
+    textSel = null; // selection persists in the DOM; only the drag ends
+
     // Drag Rails: fade the highlight out whenever a drag ends.
     if (drag) fadeDragActive(0, HIGHLIGHT_FADE_OUT_MS);
 
