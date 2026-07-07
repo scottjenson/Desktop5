@@ -435,8 +435,11 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     }
 
     // Shake detection: count direction reversals with min travel filter.
+    // One stash per grab: after a fire, drag.shook gates re-triggering until the
+    // next mousedown (a repeat within the same grab is always a no-op anyway —
+    // stashAll skips parked windows — but re-firing muddies logs and mental model).
     const shakeDx = cursorCx - drag.shakeLastCx;
-    if (Math.abs(shakeDx) >= SHAKE_MIN_TRAVEL) {
+    if (!drag.shook && Math.abs(shakeDx) >= SHAKE_MIN_TRAVEL) {
       const dir = shakeDx > 0 ? 1 : -1;
       if (drag.shakeDir !== 0 && dir !== drag.shakeDir) {
         const now = performance.now();
