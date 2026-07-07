@@ -21,12 +21,12 @@ The product is a web prototype that renders standard HTML/CSS application window
 ---
 ## 🛠 Technology Stack & Constraints
 
-* **3D library:** Vanilla Three.js, **`r184+` strictly required** (first version with `HTMLTexture`). Loaded via importmap from CDN.
+* **3D library:** Vanilla Three.js, **`r185+` strictly required**. r184 introduced `HTMLTexture` but speaks the pre-Origin-Trial API draft and throws `TypeError: ... not of type '(Element or ElementImage)'` on Chrome 150+; r185 supports the new WICG signatures with per-Chrome-version code paths (see Learning #14). Loaded via importmap from CDN.
 * **Frameworks:** **NONE.** No React/Vue/R3F, no drei `<Html>`, no `html2canvas` — HTML renders *into* WebGL via `HTMLTexture`. Vanilla JS modules only.
 * **Core feature:** Chrome **HTML-in-canvas** via the `layoutsubtree` canvas attribute + `THREE.HTMLTexture`.
 * **Styling:** Plain CSS (Flexbox, variables, `border-radius`) on DOM nodes hosted inside source canvases.
 * **No build step.** ES modules + `fetch()` of window fragments ⇒ the project **must be served over HTTP**. `file://` breaks both module imports and fragment fetches.
-* **Environment:** highly experimental API. The user runs **Chrome Canary (Chromium 146+)** with `chrome://flags/#canvas-draw-element` enabled. No other-browser fallbacks needed; assume `layoutsubtree` and `requestPaint` work.
+* **Environment:** highly experimental API. The user runs **Chrome Canary (Chromium 150+)** with `chrome://flags/#canvas-draw-element` enabled; the API is in an Origin Trial (Chrome 148+) and still changing shape. No other-browser fallbacks needed; assume `layoutsubtree` and `requestPaint` work.
 
 ---
 ## 🏗 Architecture
@@ -131,6 +131,9 @@ Sluggish on a fanless laptop with the original setup: a fixed 3440×1440×2 buff
 
 **13. Hit-testing the reparented DOM works — with two traps (verified 2026-07-06, via wp text selection).**
 `document.elementFromPoint` / `caretRangeFromPoint` DO see the reparented `layoutsubtree` DOM inside `#gl`, and its hit boxes live in **live `getBoundingClientRect` space** — this validates Phase B's synthetic-events plan. Two traps: **(a) occlusion** — all reparented roots (windows + chrome + menubar, direct children of `#gl`) overlap in layout space and the topmost wins, so a lookup against one window must first set `pointer-events:'none'` on every other `#gl` child (synchronous, restored immediately; pointer-events doesn't trigger a repaint); **(b) viewport clipping** — the APIs only see points inside the browser viewport, and window layout boxes extend past it; compensate by temporarily adjusting the window's own `scrollEl.scrollTop` and restoring synchronously. Also: synthetic mouse events are untrusted and can NEVER trigger native text selection — drive `selection.setBaseAndExtent()` programmatically instead; Chrome paints the highlight into the window's texture automatically at any mesh scale. All of this lives in `caretFromLocal()` (windows.js).
+
+**14. Canary auto-updates WILL break this app — the API is an Origin Trial and still moving (bitten 2026-07-07).**
+Chrome 150 reshaped the HTML-in-canvas API (`layoutsubtree` attribute → `layoutSubtree()` method, new `ElementImage` objects), and three r184 — written against the 146-era draft — started throwing `TypeError: Failed to execute 'texElementImage2D' ... not of type '(Element or ElementImage)'` on every texture upload (grid shader renders, every window/menubar invisible). **Fix: bump the three importmap pin — r185+ speaks the new WICG signatures with per-Chrome-version code paths.** Diagnosis shortcut: if `texElementImage2D` *executes but rejects its argument*, the flag is fine and it's an API-shape mismatch — check three's release notes for HTMLTexture updates before debugging our code. After any such bump, re-verify the three features riding on three's internals: wp text selection (Learning #13), wheel-scroll routing, music play button (all confirmed intact on r185 + Chrome 150). **Rule: before demo day, freeze the environment — verify, then don't relaunch Canary (it updates on relaunch); keep a known-good pinned Chromium build as backup.**
 
 ---
 ## 📍 Status
