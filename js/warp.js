@@ -51,6 +51,19 @@ export function warpInverse(xwNorm) {
   return xs;
 }
 
+// Physical ↔ logical desktop px (x only) — px-space wrappers around warpForward/
+// warpInverse. Flat-window drags keep the grab offset constant in LOGICAL space:
+// getWindowScale is 1/f′ of this same curve, so a constant logical offset renders
+// as a physical offset that shrinks in proportion to the window, keeping the
+// grabbed point under the cursor (a fixed physical offset makes the cursor race
+// ahead of / lag behind the window as it shrinks).
+export function physToLogicalX(px) {
+  return (warpForward((px - DESKTOP_W / 2) / (DESKTOP_W / 2)) + 1) * (DESKTOP_W / 2);
+}
+export function logicalToPhysX(lx) {
+  return (warpInverse(lx / (DESKTOP_W / 2) - 1) + 1) * (DESKTOP_W / 2);
+}
+
 // Physical cursor (desktop px) → LOGICAL desktop px, for dragging MORPHED windows.
 // The raycaster returns physical coords but a morphed mesh's position is logical —
 // the gap documented in plans/vertex-warp-experiment.md ("runs away" drag). Y per

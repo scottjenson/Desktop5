@@ -12,6 +12,7 @@ import {
 // Stateless warp-curve math + edge/stash geometry (extracted — see js/warp.js).
 import {
   getWindowScale, gridLocalScale, warpInverse, cursorToLogical,
+  physToLogicalX, logicalToPhysX,
   EDGE_ZONES, snapToEdge, stashColumn,
 } from './warp.js';
 
@@ -327,7 +328,11 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
         mesh, info,
         shift: isShift,
         morphed, morphMode, grabScale,
-        grabOffsetX: cx - cursorCx,
+        // Morphed drags already track in logical space (cursorCx is logical, cx is
+        // the mesh's logical center) — a plain difference is a logical offset. Flat
+        // drags forward-warp both ends so their offset is logical too (see warp.js).
+        grabOffsetX: morphed ? cx - cursorCx
+                             : physToLogicalX(cx) - physToLogicalX(cursorCx),
         topOffsetY:  windowTopY - cursorCy,
         hasMoved: false,
         activeZone:    null,
@@ -385,7 +390,12 @@ export function initWindows({ gl, camera, windowMeshes, S, chromeSrc, menubarSrc
     const physCy = worldToCenter(0, hit.y).cy;
     const { cx: cursorCx, cy: cursorCy } = drag.morphed ? cursorToLogical(physCx, physCy, drag.morphMode) : { cx: physCx, cy: physCy };
 
-    let cx = cursorCx + drag.grabOffsetX;
+    // grabOffsetX is a LOGICAL-space offset in both branches: constant there, it
+    // shrinks in physical px in proportion to the window, so the grabbed point
+    // stays under the cursor all the way to the bezel.
+    let cx = drag.morphed
+      ? cursorCx + drag.grabOffsetX
+      : logicalToPhysX(physToLogicalX(cursorCx) + drag.grabOffsetX);
     let scale;
     if (drag.morphed) {
       // The warp compresses a morphed window GEOMETRICALLY — applying the flat
